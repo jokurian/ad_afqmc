@@ -15,7 +15,7 @@ from jax import numpy as jnp
 from mpi4py import MPI
 
 from ad_afqmc import driver, hamiltonian, propagation, wavefunctions
-
+from ad_afqmc import pyscf_interface
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
@@ -60,7 +60,7 @@ def _prep_afqmc(options=None):
     options["trial"] = options.get("trial", "rhf")
     options["ene0"] = options.get("ene0", 0.0)
     options["free_projection"] = options.get("free_projection", False)
-
+    options["numCore"] = options.get("numCore",None)#;import pdb;pdb.set_trace()
     if abs(ms) != 0:
         try:
             assert options["walker_type"] != "rhf"
@@ -103,6 +103,12 @@ def _prep_afqmc(options=None):
         )
         trial = wavefunctions.rhf(norb, nelec // 2)
         wave_data = jnp.eye(norb)
+        if options["trial"] =="multislater":
+            #ham = hamiltonian.hamiltonian_hci(nmo, nelec//2, nchol)
+            hamiltonian.hamiltonian(nmo, nelec // 2, nchol)
+            wave_data = pyscf_interface.getExcitation(options["numCore"], fname='dets.bin', maxExcitation=4) 
+            #wave_data = {key: jnp.array(value) for key, value in wave_data.items()}
+            trial = wavefunctions.hci(norb,nelec//2)
     elif options["walker_type"] == "uhf":
         ham_data["h1"] = jnp.array([h1, h1])
         if options["symmetry"]:

@@ -508,6 +508,113 @@ def fci_to_noci(fci, ndets=None, tol=1.0e-4):
         pickle.dump([np.array(coeffs[:ndets]), [dets_up, dets_dn]], f)
     return np.array(coeffs[:ndets]), [dets_up, dets_dn]
 
+def getExcitation(numCore, fname='dets.bin', ndets=None, maxExcitation=4):
+    norbs, state, ndetsAll = read_dets()
+    #from jax import numpy as np
+    if ndets is None:
+        ndets = ndetsAll
+
+    dets = list(state.keys())[:ndets]
+    Acre, Ades, Bcre, Bdes, coeff = {}, {}, {}, {}, {}
+    d0 = dets[0]
+    d0a, d0b = np.asarray(d0[0]), np.asarray(d0[1])
+    for d in dets:
+        dia, dib = np.asarray(d[0]), np.asarray(d[1])
+        nex = ( np.sum(abs(dia - d0a))//2,  np.sum(abs(dib - d0b))//2 )
+        if (nex[0] + nex[1] > maxExcitation):
+            continue
+        coeff[nex] = coeff.get(nex, []) + [state[d]]
+        if (nex[0] > 0 and nex[1] > 0):
+            Acre[nex], Ades[nex], Bcre[nex],Bdes[nex] = Acre.get(nex, []) + [np.nonzero( (d0a-dia)>0)], Ades.get(nex, [])+[np.nonzero( (d0a-dia)<0)], Bcre.get(nex, []) + [np.nonzero( (d0b-dib)>0)], Bdes.get(nex, [])+[np.nonzero( (d0b-dib)<0)] 
+            coeff[nex][-1] *= parity(d0a, Acre[nex][-1], Ades[nex][-1]) * parity(d0b, Bcre[nex][-1], Bdes[nex][-1]) 
+            
+        elif (nex[0] > 0 and nex[1] == 0):
+            Acre[nex], Ades[nex] = Acre.get(nex, []) + [np.nonzero( (d0a-dia)>0)], Ades.get(nex, [])+[np.nonzero( (d0a-dia)<0)]
+            coeff[nex][-1] *= parity(d0a, Acre[nex][-1], Ades[nex][-1]) 
+
+        elif (nex[0] == 0 and nex[1] > 0):
+            Bcre[nex],Bdes[nex] = Bcre.get(nex, []) + [np.nonzero( (d0b-dib)>0)], Bdes.get(nex, [])+[np.nonzero( (d0b-dib)<0)] 
+            coeff[nex][-1] *= parity(d0b, Bcre[nex][-1], Bdes[nex][-1]) 
+
+    coeff[(0,0)] = np.asarray(coeff[(0,0)]).reshape(-1,)
+    ##fill up the arrays up to maxExcitations
+    for i in range(1,maxExcitation+1):
+        ##singe alpha excitation
+        if ((i,0) in Ades):
+            Ades[(i,0)] = np.asarray(Ades[(i,0)]).reshape(-1,i) + numCore
+            Acre[(i,0)] = np.asarray(Acre[(i,0)]).reshape(-1,i) + numCore
+            coeff[(i,0)] = np.asarray(coeff[(i,0)]).reshape(-1,) 
+        else:
+            Ades[(i,0)] = np.zeros((1,i), dtype=int)
+            Acre[(i,0)] = np.zeros((1,i), dtype=int)
+            coeff[(i,0)] = np.zeros((1,))
+
+        ##singe beta excitation
+        if ((0,i) in Bdes):
+            Bdes[(0,i)] = np.asarray(Bdes[(0,i)]).reshape(-1,i)+ numCore
+            Bcre[(0,i)] = np.asarray(Bcre[(0,i)]).reshape(-1,i)+ numCore
+            coeff[(0,i)] = np.asarray(coeff[(0,i)]).reshape(-1,)
+        else:
+            Bdes[(0,i)] = np.zeros((1,i), dtype=int)
+            Bcre[(0,i)] = np.zeros((1,i), dtype=int)
+            coeff[(0,i)] = np.zeros((1,))
+
+        #alpha-beta
+        if (i != 0):
+            for j in range(1,maxExcitation+1):
+                if ((i,j) in Ades):
+                    Ades[(i,j)] = np.asarray(Ades[(i,j)]).reshape(-1,i)+ numCore
+                    Acre[(i,j)] = np.asarray(Acre[(i,j)]).reshape(-1,i)+ numCore
+                    Bdes[(i,j)] = np.asarray(Bdes[(i,j)]).reshape(-1,j)+ numCore
+                    Bcre[(i,j)] = np.asarray(Bcre[(i,j)]).reshape(-1,j)+ numCore
+                    coeff[(i,j)] = np.asarray(coeff[(i,j)]).reshape(-1,)
+                else:
+                    Ades[(i,j)] = np.zeros((1,j), dtype=int)
+                    Acre[(i,j)] = np.zeros((1,j), dtype=int)
+                    Bdes[(i,j)] = np.zeros((1,j), dtype=int)
+                    Bcre[(i,j)] = np.zeros((1,j), dtype=int)
+                    coeff[(i,j)] = np.zeros((1,))
+    
+           
+    return Acre, Ades, Bcre, Bdes, coeff
+
+# reading dets from dice
+def read_dets(fname='dets.bin', ndets=None):
+    state = {}
+    norbs = 0
+    with open(fname, 'rb') as f:
+        ndetsAll = struct.unpack('i', f.read(4))[0]
+        norbs = struct.unpack('i', f.read(4))[0]
+        if ndets is None:
+            ndets = ndetsAll
+        for i in range(ndets):
+            coeff = struct.unpack('d', f.read(8))[0]
+            det = [[0 for i in range(norbs)], [0 for i in range(norbs)]]
+            for j in range(norbs):
+                occ = struct.unpack('c', f.read(1))[0]
+                if (occ == b'a'):
+                    det[0][j] = 1
+                elif (occ == b'b'):
+                    det[1][j] = 1
+                elif (occ == b'2'):
+                    det[0][j] = 1
+                    det[1][j] = 1
+            state[tuple(map(tuple, det))] = coeff
+
+    return norbs, state, ndetsAll
+
+def parity(d0, cre, des):
+    d = 1.*d0
+    parity = 1.
+
+    C = np.asarray(cre).flatten()
+    D = np.asarray(des).flatten()
+    for i in range(C.shape[0]):
+        I, A = min(D[i], C[i]), max(D[i], C[i])
+        parity *= (1. - 2.* ((np.sum(d[I+1:A]))%2))
+        d[C[i]] = 0
+        d[D[i]] = 1
+    return parity
 
 if __name__ == "__main__":
     from pyscf import fci, gto, scf
@@ -527,3 +634,4 @@ if __name__ == "__main__":
     ci.kernel()
 
     ci_coeffs, dets = pyscf_interface.fci_to_noci(ci, ndets=5)
+

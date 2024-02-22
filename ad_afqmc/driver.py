@@ -49,6 +49,29 @@ def afqmc(ham_data, ham, propagator, trial, wave_data, observable, options):
     trial_rdm1 = trial.get_rdm1(wave_data)
     trial_observable = np.sum(trial_rdm1 * observable_op)
 
+
+#    import extract_walkers,jax
+#  #import pdb;pdb.set_trace()
+##  print("Here")
+#    walkers = extract_walkers.read_and_organize_arrays('walker_0.txt',(6,3))[:10,:,:]#(26,5))
+#    energy_samples = np.real(trial.calc_energy_vmap(ham_data, walkers, wave_data)) #jnp.real(calc_energy_vmap(h0, h1, chol.reshape(-1,norb,norb), walkers, excitations))
+#    print(energy_samples)#[:10])
+#    overlap_samples = np.real(trial.calc_overlap_vmap(walkers, wave_data))
+#    print(overlap_samples)#[:10])
+#
+#    fb_samples = trial.calc_force_bias_vmap(walkers, ham_data, wave_data)
+#    data_array_real_numpy = jax.device_get(fb_samples).real
+#    #  # Specify the file path
+#    file_path_real = 'fb_ad.txt'
+#
+#  # Write the array with real numbers to a file using NumPy
+#    np.savetxt(file_path_real, data_array_real_numpy, fmt='%.8f\n')
+#    exit(0)
+
+
+
+
+
     comm.Barrier()
     init_time = time.time() - init
     if rank == 0:
@@ -196,7 +219,7 @@ def afqmc(ham_data, ham, propagator, trial, wave_data, observable, options):
             )
             block_rdm1_n = block_vjp_fun(1.0)[1]
             block_observable_n = np.sum(block_rdm1_n * observable_op)
-            if np.isnan(block_observable_n) or np.isinf(block_observable_n):
+            if np.isnan(block_observable_n) or np.isinf(block_observable_n): 
                 block_observable_n = trial_observable
                 block_rdm1_n = trial_rdm1
                 local_large_deviations += 1
@@ -210,6 +233,7 @@ def afqmc(ham_data, ham, propagator, trial, wave_data, observable, options):
         block_observable_n = np.array(
             [block_observable_n + observable_constant], dtype="float32"
         )
+        #print(block_observable_n)
         block_weight_n = np.array([jnp.sum(prop_data["weights"])], dtype="float32")
         block_rdm1_n = np.array(block_rdm1_n, dtype="float32")
 
