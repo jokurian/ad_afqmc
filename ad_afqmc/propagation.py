@@ -38,9 +38,10 @@ class propagator:
     def init_prop_data(self, trial, wave_data, ham, ham_data):
         prop_data = {}
         prop_data["weights"] = jnp.ones(self.n_walkers)
-        prop_data["walkers"] = jnp.stack(
-            [jnp.eye(ham.norb, ham.nelec) + 0.0j for _ in range(self.n_walkers)]
-        )
+        prop_data["walkers"] = jnp.stack([wave_data[:,:ham.nelec] + 0.0j for _ in range(self.n_walkers)])
+        # prop_data["walkers"] = jnp.stack(
+        #     [jnp.eye(ham.norb, ham.nelec) + 0.0j for _ in range(self.n_walkers)]
+        # )
         energy_samples = jnp.real(
             trial.calc_energy_vmap(ham_data, prop_data["walkers"], wave_data)
         )

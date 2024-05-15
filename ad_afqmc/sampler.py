@@ -228,3 +228,26 @@ def propagate_free(ham, ham_data, propagator, prop_data, trial, wave_data):
         _block_scan_free_wrapper, prop_data, None, length=propagator.n_blocks
     )
     return prop_data_tr, block_energy, block_weight, prop_data["key"]
+
+@partial(jit, static_argnums=(0, 5, 7)) 
+def propagate_phaseless_ad_grad(
+    ham, ham_data, coupling ,rdm1op,rdm2op, propagator, prop_data, trial, wave_data
+):
+
+    ham_data["h1"] = ham_data["h1"] + coupling * rdm1op
+    rdm2op = (rdm2op 
+             + jnp.transpose(rdm2op,(0,2,1)))/2
+
+    ham_data["chol"] = rdm2op.reshape(-1, ham.norb * ham.norb)
+
+    mo_coeff = trial.optimize_orbs(ham_data, wave_data)
+    wave_data = jnp.linalg.qr(mo_coeff.T @ mo_coeff)[0]
+
+    ham_data = ham.rot_orbs(ham_data,mo_coeff)#wave_data)
+    ham_data = ham.rot_ham(ham_data,wave_data)#wave_data)
+    ham_data = ham.prop_ham(ham_data, propagator.dt, trial, wave_data)
+    prop_data, (block_energy, block_weight) = _ad_block(
+        prop_data, ham_data, propagator, trial, wave_data
+    )
+
+    return jnp.sum(block_energy * block_weight) / jnp.sum(block_weight), prop_data

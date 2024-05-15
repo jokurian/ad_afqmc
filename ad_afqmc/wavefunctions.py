@@ -29,7 +29,7 @@ class rhf:
 
     @partial(jit, static_argnums=0)
     def calc_overlap(self, walker, wave_data=None):
-        return jnp.linalg.det(walker[: walker.shape[1], :]) ** 2
+        return jnp.linalg.det(wave_data[:,:self.nelec].T @ walker) **2
 
     @partial(jit, static_argnums=0)
     def calc_overlap_vmap(self, walkers, wave_data=None):
@@ -37,7 +37,7 @@ class rhf:
 
     @partial(jit, static_argnums=0)
     def calc_green(self, walker, wave_data=None):
-        return (walker.dot(jnp.linalg.inv(walker[: walker.shape[1], :]))).T
+        return (walker.dot(jnp.linalg.inv(wave_data[:,:self.nelec].T.dot(walker)))).T
 
     @partial(jit, static_argnums=0)
     def calc_green_vmap(self, walkers, wave_data=None):
@@ -118,8 +118,9 @@ class rhf:
             return dm, mo_coeff
 
         norb = h1.shape[0]
-        dm0 = 2 * jnp.eye(norb, nelec).dot(jnp.eye(norb, nelec).T)
-        _, mo_coeff = lax.scan(scanned_fun, dm0, None, length=self.n_opt_iter)
+        if(ham_data["dm0"] is not None): dm0 = ham_data["dm0"]
+        else : dm0 = 2 * jnp.eye(norb, nelec).dot(jnp.eye(norb, nelec).T)
+        dm, mo_coeff = lax.scan(scanned_fun, dm0, None, length=self.n_opt_iter)
 
         return mo_coeff[-1]
 
