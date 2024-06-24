@@ -16,7 +16,7 @@ import jax.numpy as jnp
 from jax import dtypes, jvp, random, vjp
 from mpi4py import MPI
 
-from ad_afqmc import propagation, sampler, stat_utils
+from ad_afqmc import propagation, sampler, stat_utils, grad_utils
 
 print = partial(print, flush=True)
 
@@ -104,7 +104,7 @@ def afqmc(ham_data, ham, propagator, trial, wave_data, observable, options):
         comm.Bcast(block_weight_n, root=0)
         comm.Bcast(block_energy_n, root=0)
         prop_data = propagator.orthonormalize_walkers(prop_data)
-        prop_data = propagator.stochastic_reconfiguration_global(prop_data, comm)
+        if(options["do_sr"]): prop_data = propagator.stochastic_reconfiguration_global(prop_data, comm)
         prop_data["e_estimate"] = (
             0.9 * prop_data["e_estimate"] + 0.1 * block_energy_n[0]
         )
@@ -252,8 +252,8 @@ def afqmc(ham_data, ham, propagator, trial, wave_data, observable, options):
             else:
                 with open(f"prop_data_{rank}.bin", "wb") as f:
                     pickle.dump(prop_data, f)
-
-        prop_data = propagator.stochastic_reconfiguration_global(prop_data, comm)
+        
+        if(options["do_sr"]): prop_data = propagator.stochastic_reconfiguration_global(prop_data, comm)
         prop_data["e_estimate"] = 0.9 * prop_data["e_estimate"] + 0.1 * block_energy_n
 
         if n % (max(propagator.n_blocks // 10, 1)) == 0:
@@ -422,20 +422,19 @@ def afqmcGrad(ham_data, ham, propagator, trial, wave_data, observable, options,i
         observable_op = jnp.array(ham_data["h1"])
         observable_constant = 0.0
 
-    rdm1_op = 0.0 * jnp.array(ham_data["h1"])  # for reverse mode
+    import copy
+    rdm1_op = jnp.array(ham_data["h1"])  # for reverse mode
     nchol = ham.nchol
     norb = ham.norb
-    natm = integral_der[0].shape[0]
-    import copy
-    rdm2_op = ham_data["chol"].reshape((-1,norb,norb)).copy() #jnp.array(eri_full).reshape(norb, norb, norb, norb)
+    #natm = integral_der[0].shape[0]
+    rdm2_op = ham_data["chol"].reshape((-1,norb,norb)).copy() 
 
     # print(f'wave_data:\n{wave_data}')
     ham_data = ham.rot_ham(ham_data, wave_data)
     ham_data = ham.prop_ham(ham_data, propagator.dt, trial, wave_data)
     # print(f'ham_data:\n{ham_data}')
     prop_data = propagator.init_prop_data(trial, wave_data, ham, ham_data)
-    # print(f'prop_data:\n{prop_data}')
-    #import pdb;pdb.set_trace()
+    #print(f'prop_data:\n{prop_data}')
     prop_data["key"] = random.PRNGKey(seed + rank)
     trial_rdm1 = trial.get_rdm1(wave_data)
     trial_observable = np.sum(trial_rdm1 * observable_op)
@@ -531,7 +530,7 @@ def afqmcGrad(ham_data, ham, propagator, trial, wave_data, observable, options,i
     if rank == 0:
         global_block_weights = np.zeros(size * propagator.n_blocks)
         global_block_energies = np.zeros(size * propagator.n_blocks)
-        global_block_observables = np.zeros((size * propagator.n_blocks, natm,3))
+        global_block_observables = np.zeros(size * propagator.n_blocks) #np.zeros((size * propagator.n_blocks, natm,3))
         if options["ad_mode"] == "reverse":
             global_block_rdm1s = np.zeros(
                 (size * propagator.n_blocks, *(np.zeros_like(ham_data["h1"]).shape))
@@ -539,11 +538,23 @@ def afqmcGrad(ham_data, ham, propagator, trial, wave_data, observable, options,i
             global_block_rdm2s = np.zeros(
                 (size * propagator.n_blocks, *(rdm2_op.shape))
             )
-           
-    if options["do_grad"] == True:
+    if options["do_grad"] == True and options["orbital_rotation"] == False and options["do_sr"] ==False:      
         propagate_phaseless_wrapper = (
-            lambda x, y,k, z: sampler.propagate_phaseless_ad_grad(
-                ham, ham_data, x, y,k, propagator, z, trial, wave_data
+            lambda y,k, z: sampler.propagate_phaseless_nucgrad_norot_nosr(
+                ham, ham_data, y,k, propagator, z, trial, wave_data
+        )
+    ) 
+
+    elif options["do_grad"] == True and options["orbital_rotation"] == False and options["do_sr"]==True:
+        propagate_phaseless_wrapper = (
+            lambda y,k, z: sampler.propagate_phaseless_nucgrad_norot(
+                ham, ham_data, y,k, propagator, z, trial, wave_data
+            )
+        )
+    elif options["do_grad"] == True and options["orbital_rotation"] == True:
+        propagate_phaseless_wrapper = (
+            lambda y,k, z: sampler.propagate_phaseless_nucgrad(
+                ham, ham_data, y,k, propagator, z, trial, wave_data
             )
         )
 
@@ -580,10 +591,20 @@ def afqmcGrad(ham_data, ham, propagator, trial, wave_data, observable, options,i
             prop_data_tangent[x] = np.zeros_like(prop_data[x])
 
     block_rdm1_n = np.zeros_like(ham_data["h1"]) #np.zeros_like(coords).ravel()# np.zeros_like(ham_data["h1"])
-    block_observable_n = np.zeros((natm,3))
+    block_observable_n = 0.0 #np.zeros((natm,3))
     block_rdm2_n = np.zeros_like(rdm2_op)
     for n in range(propagator.n_blocks):
-        if options["ad_mode"] == "forward":
+        if options["do_grad"]:
+            coupling = 1.0
+            block_energy_n, block_vjp_fun, prop_data = vjp(
+                propagate_phaseless_wrapper, rdm1_op,rdm2_op, prop_data, has_aux=True
+            )
+            
+            block_rdm1_n = block_vjp_fun(1.0)[0]
+            block_rdm2_n = block_vjp_fun(1.0)[1]
+            grad_utils.append_to_array(f"en_der_afqmc_{comm.rank}.npz",block_rdm1_n,block_rdm2_n,jnp.sum(prop_data["weights"]))
+
+        elif options["ad_mode"] == "forward":
             coupling = 0.0
             block_energy_n, block_observable_n, prop_data = jvp(
                 propagate_phaseless_wrapper,
@@ -594,27 +615,7 @@ def afqmcGrad(ham_data, ham, propagator, trial, wave_data, observable, options,i
             if np.isnan(block_observable_n) or np.isinf(block_observable_n):
                 block_observable_n = trial_observable
                 local_large_deviations += 1
-        elif options["ad_mode"] == "reverse" and options["do_grad"]:
-            coupling = 1.0
-            block_energy_n, block_vjp_fun, prop_data = vjp(
-                propagate_phaseless_wrapper, coupling, rdm1_op,rdm2_op, prop_data, has_aux=True
-            )
-            
-            block_rdm1_n = block_vjp_fun(1.0)[1]
-            h1_der = integral_der[0] 
-            nocc = ham.nelec
-            block_observable_n = np.einsum("mn,rxmn->rx",block_rdm1_n,h1_der)
 
-            block_rdm2_n = block_vjp_fun(1.0)[2]
-            h2_der = integral_der[1] 
-            obs_2 = np.einsum("gmn,rxgmn->rx",block_rdm2_n,h2_der)
-            block_observable_n += obs_2
-
-            e0_der = 1.0 
-            h0_der = integral_der[2]
-            #print(f" 1:{np.einsum('mn,rxmn->rx',block_rdm1_n,h1_der)[0][2]}\n 2:{obs_2[0][2]}\n 0:{(e0_der * h0_der)[0][2]}\n")
-            block_observable_n += e0_der * h0_der
-            #print(block_observable_n)
         elif options["ad_mode"] == "reverse":
             coupling = 1.0
             block_energy_n, block_vjp_fun, prop_data = vjp(
@@ -634,8 +635,9 @@ def afqmcGrad(ham_data, ham, propagator, trial, wave_data, observable, options,i
             #block_observable_n = np.zeros((2,3)) # #np.zeros_like(coords)#0.0
 
         block_energy_n = np.array([block_energy_n], dtype="float32")
+        #import pdb;pdb.set_trace()
         block_observable_n = np.array(
-            [block_observable_n + observable_constant], dtype="float32")
+            block_observable_n + observable_constant, dtype="float32")
         #)
         block_weight_n = np.array([jnp.sum(prop_data["weights"])], dtype="float32")
         block_rdm1_n = np.array(block_rdm1_n, dtype="float32")
@@ -647,9 +649,10 @@ def afqmcGrad(ham_data, ham, propagator, trial, wave_data, observable, options,i
         if rank == 0:
             gather_weights = np.zeros(size, dtype="float32")
             gather_energies = np.zeros(size, dtype="float32")
-            gather_observables =np.zeros(
-                    (size, *(natm,3)), dtype="float32"
-                ) #np.zeros(size, dtype="float32")
+            gather_observables = np.zeros(size, dtype="float32")
+            #gather_observables =np.zeros(
+            #        (size, *(natm,3)), dtype="float32"
+            #    ) #np.zeros(size, dtype="float32")
             if options["ad_mode"] == "reverse":
                 gather_rdm1s = np.zeros(
                     (size, *(ham_data["h1"].shape)), dtype="float32"
@@ -752,29 +755,7 @@ def afqmcGrad(ham_data, ham, propagator, trial, wave_data, observable, options,i
                 (global_block_weights, global_block_energies#, global_block_observables)
             ),
         ))
-        # if options["ad_mode"] is not None:
-        #     samples_clean, idx = stat_utils.reject_outliers(
-        #         np.stack(
-        #             (
-        #                 global_block_weights,
-        #                 global_block_energies,
-        #                 global_block_observables,
-        #             )
-        #         ).T,
-        #         2,
-        #     )
-        # else:
-        #     samples_clean, _ = stat_utils.reject_outliers(
-        #         np.stack(
-        #             (
-        #                 global_block_weights,
-        #                 global_block_energies,
-        #                 global_block_observables,
-        #             )
-        #         ).T,
-        #         1,
-        #     )
-        #import pdb; pdb.set_trace()
+
         samples_clean = np.array([global_block_weights, global_block_energies, global_block_energies])
         print(
             f"# Number of outliers in post: {global_block_weights.size - samples_clean[0].shape[0]} "
@@ -800,28 +781,12 @@ def afqmcGrad(ham_data, ham, propagator, trial, wave_data, observable, options,i
         elif e_afqmc is not None:
             print(f"AFQMC energy: {e_afqmc}\n", flush=True)
             e_err_afqmc = 0.0
+        
 
         if options["ad_mode"] is not None:
-            # obs_afqmc, err_afqmc = stat_utils.blocking_analysis(
-            #     global_block_weights, global_block_observables, neql=0, printQ=True
-            # )
-            # if err_afqmc is not None:
-            #     sig_dec = int(abs(np.floor(np.log10(err_afqmc))))
-            #     sig_err = np.around(
-            #         np.round(err_afqmc * 10**sig_dec) * 10 ** (-sig_dec), sig_dec
-            #     )
-            #     sig_obs = np.around(obs_afqmc, sig_dec)
-            #     print(
-            #         f"AFQMC observable: {sig_obs:.{sig_dec}f} +/- {sig_err:.{sig_dec}f}\n"
-            #     )
-            # elif obs_afqmc is not None:
-            #     print(f"AFQMC observable: {obs_afqmc}\n", flush=True)
-            if options["ad_mode"] == "reverse":
-                # avg_rdm1 = np.einsum('i,i...->...', global_block_weights, global_block_rdm1s) / np.sum(global_block_weights)
-                # norms_rdm1 = np.array(list(map(np.linalg.norm, global_block_rdm1s)))
-                # samples_clean, idx = stat_utils.reject_outliers(
-                #     np.stack((global_block_weights, norms_rdm1)).T, 1
-                # )
+
+            if options["do_grad"]:
+
                 global_block_weights = samples_clean[0]#[:, 0]
                 global_block_rdm1s = global_block_rdm1s#[idx]
                 avg_rdm1 = np.einsum(
@@ -834,23 +799,12 @@ def afqmcGrad(ham_data, ham, propagator, trial, wave_data, observable, options,i
                 obs_afqmc, err_afqmc = stat_utils.blocking_analysis(
                     global_block_weights, errors_rdm1, neql=0, printQ=True
                 )
-                np.savez("rdm1_afqmc.npz", rdm1=avg_rdm1)
-                avg_grad = np.einsum("i,iab->ab", global_block_weights,global_block_observables
-                                      )/np.sum(global_block_weights)
-                np.savez("grad_afqmc.npz", grad=global_block_observables)
-                #import pdb; pdb.set_trace()
-                # error_grad = np.array(
-                #     list(map(np.linalg.norm, global_block_observables - avg_grad))
-                # ) / np.linalg.norm(avg_grad)
-                # print(f"# Gradient noise:",error_grad, flush=True)
-                #print(f"Gradient : ", avg_grad)
-                def compute_weighted_average_std(arr, weights):
-                    weighted_avg_matrix = np.average(arr, axis=0, weights=weights)
-                    weighted_std_matrix = np.sqrt(np.average((arr - weighted_avg_matrix)**2, axis=0, weights=weights))
-                    return weighted_avg_matrix, weighted_std_matrix
-                avg_matrix, std_matrix = compute_weighted_average_std(global_block_observables,global_block_weights)
-                print(f"Gradient : \n", avg_matrix)
-                print(f"Gradient std :\n", std_matrix)
+                #np.savez("rdm1_afqmc.npz", rdm1=avg_rdm1)
+                #avg_grad = np.einsum("i,iab->ab", global_block_weights,global_block_observables
+                #                      )/np.sum(global_block_weights)
+                #np.savez("grad_afqmc.npz", grad=global_block_observables,weight=global_block_weights)
+                #u =
+                #grad_avg, grad_err = grad_utils.calculate_nuc_gradients(uhf=u) #grad_utils.blocking_nuc_grad()
 
 
     comm.Barrier()

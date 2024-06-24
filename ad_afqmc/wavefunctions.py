@@ -5,7 +5,7 @@ import numpy as np
 os.environ[
     "XLA_FLAGS"
 ] = "--xla_force_host_platform_device_count=1 --xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
-os.environ["JAX_PLATFORM_NAME"] = "cpu"
+#os.environ["JAX_PLATFORM_NAME"] = "cpu"
 os.environ["JAX_ENABLE_X64"] = "True"
 from dataclasses import dataclass
 from functools import partial
@@ -118,6 +118,7 @@ class rhf:
             return dm, mo_coeff
 
         norb = h1.shape[0]
+        #dm0 = 2 * jnp.eye(norb, nelec).dot(jnp.eye(norb, nelec).T)
         if(ham_data["dm0"] is not None): dm0 = ham_data["dm0"]
         else : dm0 = 2 * jnp.eye(norb, nelec).dot(jnp.eye(norb, nelec).T)
         dm, mo_coeff = lax.scan(scanned_fun, dm0, None, length=self.n_opt_iter)
@@ -285,9 +286,11 @@ class uhf:
 
             return jnp.array([dm_up, dm_dn]), jnp.array([mo_coeff_up, mo_coeff_dn])
 
-        dm_up = (wave_data[0][:, : nelec[0]]).dot(wave_data[0][:, : nelec[0]].T)
-        dm_dn = (wave_data[1][:, : nelec[1]]).dot(wave_data[1][:, : nelec[1]].T)
-        dm0 = jnp.array([dm_up, dm_dn])
+        if ham_data["dm0"] is not None : dm0 = ham_data["dm0"]
+        else:
+            dm_up = (wave_data[0][:, : nelec[0]]).dot(wave_data[0][:, : nelec[0]].T)
+            dm_dn = (wave_data[1][:, : nelec[1]]).dot(wave_data[1][:, : nelec[1]].T)
+            dm0 = jnp.array([dm_up, dm_dn])
         _, mo_coeff = lax.scan(scanned_fun, dm0, None, length=self.n_opt_iter)
 
         return mo_coeff[-1]

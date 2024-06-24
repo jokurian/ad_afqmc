@@ -3,7 +3,7 @@ import os
 os.environ[
     "XLA_FLAGS"
 ] = "--xla_force_host_platform_device_count=1 --xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
-os.environ["JAX_PLATFORM_NAME"] = "cpu"
+#os.environ["JAX_PLATFORM_NAME"] = "cpu"
 os.environ["JAX_ENABLE_X64"] = "True"
 from dataclasses import dataclass
 from functools import partial
@@ -38,6 +38,9 @@ class hamiltonian:
     @partial(jit, static_argnums=(0,))
     def rot_ham(self, ham, wave_data=None):
         ham["h1"] = (ham["h1"] + ham["h1"].T) / 2.0
+        #ham["rot_h1"] = ham["h1"][: self.nelec, :].copy()
+        #ham["rot_chol"] = (ham["chol"].reshape(-1, self.norb, self.norb)[:, : self.nelec, :].copy())
+        
         ham["rot_h1"] = (wave_data[:,:self.nelec].T @ ham["h1"]).copy() 
         ham["rot_chol"] = (jnp.einsum("pi,gij->gpj",wave_data[:,:self.nelec].T, ham["chol"].reshape(-1,self.norb,self.norb))).copy()
         return ham
@@ -84,7 +87,15 @@ class hamiltonian_uhf:
     nchol: int
 
     @partial(jit, static_argnums=(0,))
-    def rot_orbs(self, ham, wave_data):
+    def rot_orbs(self, ham, mo_coeff):
+        ham["h1"] = ham["h1"].at[0].set(mo_coeff[0].T @ ham["h1"][0] @ mo_coeff[0])
+        ham["h1"] = ham["h1"].at[1].set(mo_coeff[1].T @ ham["h1"][1] @ mo_coeff[1])
+        ham["chol"] = jnp.einsum(
+            "gij,jp->gip", ham["chol"].reshape(-1, self.norb, self.norb), mo_coeff[0]
+        )        
+        ham["chol"] = jnp.einsum("qi,gip->gqp", mo_coeff[0].T, ham["chol"]).reshape(
+            -1, self.norb * self.norb
+        )
         return ham
 
     @partial(jit, static_argnums=(0,))

@@ -3,7 +3,7 @@ import os
 os.environ[
     "XLA_FLAGS"
 ] = "--xla_force_host_platform_device_count=1 --xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
-os.environ["JAX_PLATFORM_NAME"] = "cpu"
+#os.environ["JAX_PLATFORM_NAME"] = "cpu"
 os.environ["JAX_ENABLE_X64"] = "True"
 from functools import partial
 
@@ -229,23 +229,70 @@ def propagate_free(ham, ham_data, propagator, prop_data, trial, wave_data):
     )
     return prop_data_tr, block_energy, block_weight, prop_data["key"]
 
-@partial(jit, static_argnums=(0, 5, 7)) 
-def propagate_phaseless_ad_grad(
-    ham, ham_data, coupling ,rdm1op,rdm2op, propagator, prop_data, trial, wave_data
+@partial(jit, static_argnums=(0, 4, 6)) 
+def propagate_phaseless_nucgrad_norot(
+    ham, ham_data, rdm1op,rdm2op, propagator, prop_data, trial, wave_data
 ):
 
-    ham_data["h1"] = ham_data["h1"] + coupling * rdm1op
+    ham_data["h1"] = rdm1op
+    rdm2op = (rdm2op 
+             + jnp.transpose(rdm2op,(0,2,1)))/2
+
+    ham_data["chol"] = rdm2op.reshape(-1, ham.norb * ham.norb)
+    ham_data = ham.rot_ham(ham_data,wave_data)
+    ham_data = ham.prop_ham(ham_data, propagator.dt, trial, wave_data)
+    
+    prop_data, (block_energy, block_weight) = _ad_block(
+        prop_data, ham_data, propagator, trial, wave_data
+    )
+
+    return jnp.sum(block_energy * block_weight) / jnp.sum(block_weight), prop_data
+
+@partial(jit, static_argnums=(0, 4, 6)) 
+def propagate_phaseless_nucgrad_norot_nosr(
+    ham, ham_data, rdm1op,rdm2op, propagator, prop_data, trial, wave_data
+):
+
+    ham_data["h1"] = rdm1op
+    rdm2op = (rdm2op 
+             + jnp.transpose(rdm2op,(0,2,1)))/2
+
+    ham_data["chol"] = rdm2op.reshape(-1, ham.norb * ham.norb)
+
+    ham_data = ham.rot_ham(ham_data,wave_data)
+    ham_data = ham.prop_ham(ham_data, propagator.dt, trial, wave_data)
+    
+    def _block_scan_wrapper(x, y):
+        return _block_scan(x, y, ham_data, propagator, trial, wave_data)
+
+    prop_data["overlaps"] = trial.calc_overlap_vmap(prop_data["walkers"], wave_data)
+    prop_data["n_killed_walkers"] = 0
+    prop_data["pop_control_ene_shift"] = prop_data["e_estimate"]
+    prop_data, (block_energy, block_weight) = lax.scan(
+        checkpoint(_block_scan_wrapper), prop_data, None, length=propagator.n_ene_blocks
+    )
+    prop_data["n_killed_walkers"] /= (
+        propagator.n_sr_blocks * propagator.n_ene_blocks * propagator.n_walkers
+    )
+
+    return jnp.sum(block_energy * block_weight) / jnp.sum(block_weight), prop_data
+
+@partial(jit, static_argnums=(0, 4, 6)) 
+def propagate_phaseless_nucgrad(
+    ham, ham_data, rdm1op,rdm2op, propagator, prop_data, trial, wave_data
+):
+
+    ham_data["h1"] = rdm1op
     rdm2op = (rdm2op 
              + jnp.transpose(rdm2op,(0,2,1)))/2
 
     ham_data["chol"] = rdm2op.reshape(-1, ham.norb * ham.norb)
 
     mo_coeff = trial.optimize_orbs(ham_data, wave_data)
-    wave_data = jnp.linalg.qr(mo_coeff.T @ mo_coeff)[0]
-
-    ham_data = ham.rot_orbs(ham_data,mo_coeff)#wave_data)
-    ham_data = ham.rot_ham(ham_data,wave_data)#wave_data)
+    wave_data = mo_coeff
+    ham_data = ham.rot_ham(ham_data,wave_data)
     ham_data = ham.prop_ham(ham_data, propagator.dt, trial, wave_data)
+    
     prop_data, (block_energy, block_weight) = _ad_block(
         prop_data, ham_data, propagator, trial, wave_data
     )

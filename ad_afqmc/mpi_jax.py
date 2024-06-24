@@ -104,7 +104,8 @@ def _prep_afqmc(options=None):
             options["n_walkers"],
         )
         trial = wavefunctions.rhf(norb, nelec // 2)
-        if(options["do_grad"]): wave_data =  jnp.array(np.load("rhf.npz")["mo_coeff"])
+        #wave_data = jnp.eye(norb)
+        if(options["do_grad"]): wave_data =  jnp.array(np.load("rhf.npz")["wave_data"])
         else: wave_data = jnp.eye(norb)
     elif options["walker_type"] == "uhf":
         ham_data["h1"] = jnp.array([h1, h1])
@@ -166,7 +167,8 @@ def _prep_afqmc(options=None):
                     options["n_walkers"],
                 )
             trial = wavefunctions.uhf(norb, nelec_sp)
-            wave_data = jnp.array(np.load("uhf.npz")["mo_coeff"])
+            if(options["do_grad"]): wave_data = jnp.array(np.load("uhf.npz")["wave_data"]) 
+            else: wave_data = jnp.array(np.load("uhf.npz")["mo_coeff"])
 
     if rank == 0:
         print(f"# norb: {norb}")
@@ -182,18 +184,19 @@ def _prep_afqmc(options=None):
 if __name__ == "__main__":
     ham_data, ham, prop, trial, wave_data, observable, options = _prep_afqmc()
     init = time.time()
+    comm = MPI.COMM_WORLD 
     comm.Barrier()
     e_afqmc, err_afqmc = 0.0, 0.0
     if options["free_projection"]:
         driver.fp_afqmc(ham_data, ham, prop, trial, wave_data, observable, options)
     else:
         if options["do_grad"] == True:
-          h1_der = np.load("Integral_der.npz")["array1"]
-          h2_der = np.load("Integral_der.npz")["array2"]
-          h0_der = np.load("Integral_der.npz")["array3"]
-          ham_data["dm0"] = np.load("Integral_der.npz")["dm"]
-          e_afqmc, err_afqmc = driver.afqmcGrad(
-            ham_data, ham, prop, trial, wave_data, observable, options, integral_der = [h1_der,h2_der,h0_der]
+            ham_data["dm0"] = np.load("Integral_der.npz")["dm"]
+            os.system(f"rm en_der_afqmc_{comm.rank}.npz")
+            print(f"Removed en_der_afqmc_{comm.rank}")
+            comm.Barrier()
+            e_afqmc, err_afqmc = driver.afqmcGrad(
+            ham_data, ham, prop, trial, wave_data, observable, options, integral_der = None
           )
         else:
           e_afqmc, err_afqmc = driver.afqmc(
