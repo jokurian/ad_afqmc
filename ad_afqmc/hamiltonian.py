@@ -38,18 +38,25 @@ class hamiltonian:
     @partial(jit, static_argnums=(0,))
     def rot_ham(self, ham_data, wave_data=None):
         ham_data["h1"] = (ham_data["h1"] + ham_data["h1"].T) / 2.0
-        ham_data["rot_h1"] = ham_data["h1"][: self.nelec, :].copy()
-        ham_data["rot_chol"] = (
-            ham_data["chol"]
-            .reshape(-1, self.norb, self.norb)[:, : self.nelec, :]
-            .copy()
-        )
+        #ham_data["rot_h1"] = ham_data["h1"][: self.nelec, :].copy()
+        #ham_data["rot_chol"] = (
+        #    ham_data["chol"]
+        #    .reshape(-1, self.norb, self.norb)[:, : self.nelec, :]
+        #    .copy()
+        #)
+        ham_data["rot_h1"] = (wave_data[:,:self.nelec].T @ ham_data["h1"]).copy()
+        ham_data["rot_chol"] = (jnp.einsum("pi,gij->gpj",wave_data[:,:self.nelec].T, ham_data["chol"].reshape(-1,self.norb,self.norb))).copy()
         return ham_data
 
     @partial(jit, static_argnums=(0, 3))
     def prop_ham(self, ham_data, dt, _trial, wave_data=None):
-        ham_data["mf_shifts"] = 2.0j * vmap(
-            lambda x: jnp.sum(jnp.diag(x.reshape(self.norb, self.norb))[: self.nelec])
+        trial = wave_data[:,:self.nelec]
+        dm = 2.*trial@ trial.T
+        #ham_data["mf_shifts"] = 2.0j * vmap(
+        #    lambda x: jnp.sum(jnp.diag(x.reshape(self.norb, self.norb))[: self.nelec])
+        #)(ham_data["chol"])
+        ham_data["mf_shifts"] = 1.0j * vmap(
+            lambda x: jnp.sum(x.reshape(self.norb, self.norb) * dm)
         )(ham_data["chol"])
         ham_data["mf_shifts_fp"] = ham_data["mf_shifts"] / 2.0 / self.nelec
         ham_data["h0_prop"] = (
@@ -88,7 +95,15 @@ class hamiltonian_uhf:
     nchol: int
 
     @partial(jit, static_argnums=(0,))
-    def rot_orbs(self, ham, wave_data):
+    def rot_orbs(self, ham, mo_coeff):
+        ham["h1"] = ham["h1"].at[0].set(mo_coeff[0].T @ ham["h1"][0] @ mo_coeff[0])
+        ham["h1"] = ham["h1"].at[1].set(mo_coeff[1].T @ ham["h1"][1] @ mo_coeff[1])
+        ham["chol"] = jnp.einsum(
+            "gij,jp->gip", ham["chol"].reshape(-1, self.norb, self.norb), mo_coeff[0]
+        )
+        ham["chol"] = jnp.einsum("qi,gip->gqp", mo_coeff[0].T, ham["chol"]).reshape(
+            -1, self.norb * self.norb
+        )
         return ham
 
     @partial(jit, static_argnums=(0,))

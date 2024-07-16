@@ -60,6 +60,7 @@ def _prep_afqmc(options=None):
     options["trial"] = options.get("trial", None)
     options["ene0"] = options.get("ene0", 0.0)
     options["free_projection"] = options.get("free_projection", False)
+    options["do_grad"] = options.get("do_grad",False)
 
     if abs(ms) != 0:
         try:
@@ -85,6 +86,7 @@ def _prep_afqmc(options=None):
     ham_data["h0"] = h0
     ham_data["chol"] = chol.reshape(nchol, -1)
     ham_data["ene0"] = options["ene0"]
+    ham_data["dm0"] = None
     if options["walker_type"] == "rhf":
         ham_data["h1"] = h1
         if options["symmetry"]:
@@ -102,7 +104,7 @@ def _prep_afqmc(options=None):
             options["n_walkers"],
         )
         trial = wavefunctions.rhf(norb, nelec // 2)
-        wave_data = jnp.eye(norb)
+        wave_data = jnp.array(np.load("rhf.npz")["mo_coeff"]) #jnp.eye(norb)
     elif options["walker_type"] == "uhf":
         ham_data["h1"] = jnp.array([h1, h1])
         if options["symmetry"]:
@@ -185,9 +187,14 @@ if __name__ == "__main__":
     if options["free_projection"]:
         driver.fp_afqmc(ham_data, ham, prop, trial, wave_data, observable, options)
     else:
-        e_afqmc, err_afqmc = driver.afqmc(
-            ham_data, ham, prop, trial, wave_data, observable, options
-        )
+        if(options["do_grad"]):
+            os.system(f"rm en_der_afqmc_{comm.rank}.npz")
+            print(f"Removed en_der_afqmc_{comm.rank}",flush=True)
+            ham_data["dm0"] = np.load("Integral_der.npz")["dm"]
+            comm.Barrier()
+            e_afqmc, err_afqmc = driver.afqmcGrad(ham_data, ham, prop, trial, wave_data, observable, options)
+        else: 
+            e_afqmc, err_afqmc = driver.afqmc(ham_data, ham, prop, trial, wave_data, observable, options)
     comm.Barrier()
     end = time.time()
     if rank == 0:

@@ -189,7 +189,8 @@ class rhf(wave_function):
 
     @partial(jit, static_argnums=0)
     def calc_overlap(self, walker, wave_data=None):
-        return jnp.linalg.det(walker[: walker.shape[1], :]) ** 2
+        return jnp.linalg.det(wave_data[:,:self.nelec].T @ walker) **2
+        #return jnp.linalg.det(walker[: walker.shape[1], :]) ** 2
 
     @partial(jit, static_argnums=0)
     def calc_overlap_vmap(self, walkers, wave_data=None):
@@ -197,7 +198,8 @@ class rhf(wave_function):
 
     @partial(jit, static_argnums=0)
     def calc_green(self, walker, wave_data=None):
-        return (walker.dot(jnp.linalg.inv(walker[: walker.shape[1], :]))).T
+        #return (walker.dot(jnp.linalg.inv(walker[: walker.shape[1], :]))).T
+        return (walker.dot(jnp.linalg.inv(wave_data[:,:self.nelec].T.dot(walker)))).T
 
     @partial(jit, static_argnums=0)
     def calc_green_vmap(self, walkers, wave_data=None):
@@ -278,7 +280,9 @@ class rhf(wave_function):
             return dm, mo_coeff
 
         norb = h1.shape[0]
-        dm0 = 2 * jnp.eye(norb, nelec).dot(jnp.eye(norb, nelec).T)
+#        dm0 = 2 * jnp.eye(norb, nelec).dot(jnp.eye(norb, nelec).T)
+        if(ham_data["dm0"] is not None): dm0 = ham_data["dm0"]
+        else : dm0 = 2 * jnp.eye(norb, nelec).dot(jnp.eye(norb, nelec).T)
         _, mo_coeff = lax.scan(scanned_fun, dm0, None, length=self.n_opt_iter)
 
         return mo_coeff[-1]
@@ -449,9 +453,11 @@ class uhf(wave_function):
 
             return jnp.array([dm_up, dm_dn]), jnp.array([mo_coeff_up, mo_coeff_dn])
 
-        dm_up = (wave_data[0][:, : nelec[0]]).dot(wave_data[0][:, : nelec[0]].T)
-        dm_dn = (wave_data[1][:, : nelec[1]]).dot(wave_data[1][:, : nelec[1]].T)
-        dm0 = jnp.array([dm_up, dm_dn])
+        if(ham_data["dm0"] is not None): dm0 = jnp.array(ham_data["dm0"])
+        else:
+            dm_up = (wave_data[0][:, : nelec[0]]).dot(wave_data[0][:, : nelec[0]].T)
+            dm_dn = (wave_data[1][:, : nelec[1]]).dot(wave_data[1][:, : nelec[1]].T)
+            dm0 = jnp.array([dm_up, dm_dn])
         _, mo_coeff = lax.scan(scanned_fun, dm0, None, length=self.n_opt_iter)
 
         return mo_coeff[-1]
