@@ -166,8 +166,8 @@ def prep_afqmc(
         )
         trial_coeffs[0] = q
         trial_coeffs[1] = q
-        np.savetxt("rhf.txt", q)
-
+        #np.savetxt("rhf.txt", q)
+        np.savez("rhf.npz",mo_coeff=q)
     write_dqmc(
         h1e,
         h1e_mod,
