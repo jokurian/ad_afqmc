@@ -9,6 +9,7 @@ import numpy as np
 from jax import dtypes, jvp, random, vjp
 
 from ad_afqmc import hamiltonian, misc, propagation, sampling, stat_utils, wavefunctions
+from ad_afqmc.grad_utils import append_to_array
 from ad_afqmc.config import mpi_print as print
 
 
@@ -300,7 +301,7 @@ def afqmc_observable(
     prop_data_tangent = _init_prop_data_tangent(prop_data)
     block_rdm1_n = np.zeros_like(ham_data["h1"])
     block_rdm2_n = None
-    if options["ad_mode"] == "2rdm":
+    if options["ad_mode"] == "2rdm" or options["ad_mode"] == "nuc_grad":
         block_rdm2_n = np.zeros_like(rdm_2_op)
 
     # Run sampling with AD
@@ -501,6 +502,8 @@ def _setup_rdm_operators(ad_mode, ham_data, ham, trial, wave_data):
         )
         trial_rdm2 = trial_rdm2.reshape(ham.norb**2, ham.norb**2)
         trial_rdm2 = jnp.array(trial_rdm2)
+    elif ad_mode == "nuc_grad":
+        rdm_2_op = jnp.array(ham_data["chol"]).reshape((-1, ham.norb, ham.norb)).copy()
 
     return rdm_op, rdm_2_op, trial_rdm2
 
@@ -512,6 +515,27 @@ def _setup_propagate_phaseless_wrapper(
     if options["ad_mode"] == "2rdm":
         return lambda x, y, z: sampler.propagate_phaseless_ad_1(
             ham, ham_data, x, y, propagator, z, trial, wave_data
+        )
+
+    if (
+        options["ad_mode"] == "nuc_grad"
+        and (options["orbital_rotation"] == False)
+        and (options["do_sr"] == False)
+    ):
+        return lambda x, y, k, z: sampler.propagate_phaseless_nucgrad_norot_nosr(
+            ham, ham_data, x, y, k, propagator, z, trial, wave_data
+        )
+    elif (
+        (options["ad_mode"] == "nuc_grad")
+        and (options["orbital_rotation"] == False)
+        and (options["do_sr"] == True)
+    ):
+        return lambda x, y, k, z: sampler.propagate_phaseless_nucgrad_norot(
+            ham, ham_data, x, y, k, propagator, z, trial, wave_data
+        )
+    elif (options["ad_mode"] == "nuc_grad") and (options["orbital_rotation"] == True):
+        return lambda x, y, k, z: sampler.propagate_phaseless_nucgrad(
+            ham, ham_data, x, y, k, propagator, z, trial, wave_data
         )
 
     if options["orbital_rotation"] == False and options["do_sr"] == False:
@@ -601,6 +625,20 @@ def _run_ad_step(
             block_rdm2_n = trial_rdm2
             local_large_deviations += 1
 
+    elif ad_mode == "nuc_grad":
+        coupling = 1.0
+        block_energy_n, block_vjp_fun, prop_data = vjp(
+            propagate_phaseless_wrapper,
+            coupling,
+            rdm_op,
+            rdm_2_op,
+            prop_data,
+            has_aux=True,
+        )
+        block_rdm1_n = block_vjp_fun(1.0)[1]
+        block_rdm2_n = block_vjp_fun(1.0)[2]
+        block_observable_n = 0.0
+
     # Add observable constant if needed
     block_observable_n = block_observable_n + observable_constant
 
@@ -637,6 +675,14 @@ def _gather_ad_results(
     block_rdm1_n = np.array(block_rdm1_n, dtype="float32")
     if ad_mode == "2rdm":
         block_rdm2_n = np.array(block_rdm2_n, dtype="float32")
+
+    if ad_mode == "nuc_grad":
+        append_to_array(
+            f"en_der_afqmc_{comm.rank}.npz",
+            block_rdm1_n,
+            block_rdm2_n,
+            block_weight_n,
+        )
 
     gather_weights = np.zeros(0, dtype="float32")
     gather_energies = np.zeros(0, dtype="float32")
@@ -924,7 +970,9 @@ def _analyze_observable_results(
             print(f"AFQMC observable: {obs_afqmc}\n", flush=True)
 
         observable_data = {"obs_afqmc": obs_afqmc, "obs_err_afqmc": obs_err_afqmc}
-        np.savetxt(tmpdir + "/obs_err.txt", np.array([obs_afqmc, obs_err_afqmc]))
+
+        # np.savetxt(tmpdir + "/obs_err.txt", np.array([obs_afqmc, obs_err_afqmc]))
+        np.savetxt(tmpdir + "/obs_err.txt", np.array([obs_afqmc, 0]))
 
         # Additional analysis based on AD mode
         if ad_mode == "reverse" and clean_rdm1s is not None:

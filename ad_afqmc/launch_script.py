@@ -114,7 +114,7 @@ def read_options(options: Optional[Dict] = None, tmp_dir: Optional[str] = None) 
 
     # AD mode options
     options["ad_mode"] = options.get("ad_mode", None)
-    assert options["ad_mode"] in [None, "forward", "reverse", "2rdm"]
+    assert options["ad_mode"] in [None, "forward", "reverse", "2rdm", "nuc_grad"]
 
     # Wavefunction and algorithm options
     options["orbital_rotation"] = options.get("orbital_rotation", True)
@@ -501,7 +501,16 @@ def setup_afqmc(
             print(f"# {op}: {options[op]}")
     print("#")
 
-    return ham_data, ham, prop, trial, wave_data, sampler, observable, options
+    return (
+        ham_data,
+        ham,
+        prop,
+        trial,
+        wave_data,
+        sampler,
+        observable,
+        options,
+    )
 
 
 def run_afqmc_calculation(
@@ -528,9 +537,16 @@ def run_afqmc_calculation(
     directory = tmp_dir if tmp_dir is not None else tmpdir
 
     # Prepare all components
-    ham_data, ham, prop, trial, wave_data, sampler, observable, options = setup_afqmc(
-        options=custom_options, tmp_dir=directory
-    )
+    (
+        ham_data,
+        ham,
+        prop,
+        trial,
+        wave_data,
+        sampler,
+        observable,
+        options,
+    ) = setup_afqmc(options=custom_options, tmp_dir=directory)
 
     assert trial is not None, "Trial wavefunction is None. Cannot run AFQMC."
 
