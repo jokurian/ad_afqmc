@@ -971,8 +971,8 @@ def _analyze_observable_results(
 
         observable_data = {"obs_afqmc": obs_afqmc, "obs_err_afqmc": obs_err_afqmc}
 
-        # np.savetxt(tmpdir + "/obs_err.txt", np.array([obs_afqmc, obs_err_afqmc]))
-        np.savetxt(tmpdir + "/obs_err.txt", np.array([obs_afqmc, 0]))
+        obs_err_afqmc = obs_err_afqmc if obs_err_afqmc is not None else np.nan
+        np.savetxt(tmpdir + "/obs_err.txt", np.array([obs_afqmc, obs_err_afqmc]))
 
         # Additional analysis based on AD mode
         if ad_mode == "reverse" and clean_rdm1s is not None:
