@@ -376,8 +376,6 @@ class sampler:
         rdm2op = (rdm2op + jnp.transpose(rdm2op, (0, 2, 1))) / 2
 
         ham_data["chol"] = rdm2op.reshape(-1, ham.norb * ham.norb)
-        # ham_data = ham.rot_ham(ham_data, wave_data)
-        # ham_data = ham.prop_ham(ham_data, propagator.dt, trial, wave_data)
         ham_data = ham.build_measurement_intermediates(ham_data, trial, wave_data)
         ham_data = ham.build_propagation_intermediates(
             ham_data, propagator, trial, wave_data
@@ -410,8 +408,6 @@ class sampler:
         ham_data = ham.build_propagation_intermediates(
             ham_data, propagator, trial, wave_data
         )
-        # ham_data = ham.rot_ham(ham_data, wave_data)
-        # ham_data = ham.prop_ham(ham_data, propagator.dt, trial, wave_data)
 
         def _block_scan_wrapper(x, y):
             return self._block_scan(x, y, ham_data, propagator, trial, wave_data)
@@ -450,8 +446,6 @@ class sampler:
         ham_data["chol"] = rdm2op.reshape(-1, ham.norb * ham.norb)
 
         wave_data = trial.optimize(ham_data, wave_data)
-        # ham_data = ham.rot_ham(ham_data, wave_data)
-        # ham_data = ham.prop_ham(ham_data, propagator.dt, trial, wave_data)
         ham_data = ham.build_measurement_intermediates(ham_data, trial, wave_data)
         ham_data = ham.build_propagation_intermediates(
             ham_data, propagator, trial, wave_data
@@ -484,8 +478,6 @@ class sampler:
 
         mo_coeff = trial.optimize(ham_data, wave_data)
         wave_data = mo_coeff
-        # ham_data = ham.rot_ham(ham_data, wave_data)
-        # ham_data = ham.prop_ham(ham_data, propagator.dt, trial, wave_data)
         ham_data = ham.build_measurement_intermediates(ham_data, trial, wave_data)
         ham_data = ham.build_propagation_intermediates(
             ham_data, propagator, trial, wave_data
