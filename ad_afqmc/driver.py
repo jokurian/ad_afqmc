@@ -86,7 +86,7 @@ def afqmc_energy(
     n_ene_blocks_eql = options["n_ene_blocks_eql"]
     n_sr_blocks_eql = options["n_sr_blocks_eql"]
     n_eql = options["n_eql"]
-    sampler_eq = sampling.sampler(
+    sampler_eq = type(sampler)(
         n_prop_steps=50,
         n_ene_blocks=n_ene_blocks_eql,
         n_sr_blocks=n_sr_blocks_eql,
@@ -458,7 +458,7 @@ def _run_equilibration(
         prop_data = propagator.stochastic_reconfiguration_global(prop_data, comm)
         prop_data["e_estimate"] = (
             0.9 * prop_data["e_estimate"] + 0.1 * block_energy_n[0]
-        )
+        ).astype("float64")
 
         comm.Barrier()
         if n % (max(sampler_eq.n_blocks // 5, 1)) == 0:
@@ -968,6 +968,9 @@ def _analyze_observable_results(
             )
         elif obs_afqmc is not None:
             print(f"AFQMC observable: {obs_afqmc}\n", flush=True)
+        else:
+            obs_afqmc = 0.0
+            obs_err_afqmc = 0.0
 
         observable_data = {"obs_afqmc": obs_afqmc, "obs_err_afqmc": obs_err_afqmc}
 
