@@ -384,22 +384,56 @@ class AFQMC:
         """
         os.makedirs(self.tmpdir, exist_ok=True)
 
+        options = self.make_options_dict()
+
         if self.ad_mode != "nuc_grad":
-            pyscf_prep = utils.prep_afqmc(
-                self.mf_or_cc,
-                basis_coeff=self.basis_coeff,
-                norb_frozen=self.norb_frozen,
-                chol_cut=self.chol_cut,
-                integrals=self.integrals,
-                tmpdir=self.tmpdir,
-                write_to_disk=self.write_to_disk,
-            )
+            from ad_afqmc.prep import PrepAfqmc
+            prep = PrepAfqmc()
+            mol = self.mf_or_cc.mol
+            prep.tmp.mol = mol
+            prep.mol.spin = mol.spin
+            prep.mol.n_a, prep.mol.n_b = mol.nelec
+            prep.tmp.mf_or_cc = self.mf_or_cc
+            # Super dirty
+            if self.basis_coeff == None:
+                if isinstance(self.mf_or_cc, (scf.uhf.UHF, UCCSD)):
+                    prep.mo_basis.basis_coeff = self.mf_or_cc.mo_coeff[0]
+                else:
+                    prep.mo_basis.basis_coeff = self.mf_or_cc.mo_coeff
+            else:
+                prep.mo_basis.basis_coeff = self.basis_coeff
+            prep.mo_basis.norb_frozen = self.norb_frozen
+            prep.mo_basis.chol_cut = self.chol_cut
+            prep.path.tmpdir = self.tmpdir
+            prep.path.fcidump = self.tmpdir
+            # Dirty
+            if self.free_projection:
+                prep.tmp.write_to_disk = True
+            else:
+                prep.tmp.write_to_disk = self.write_to_disk
+                
+            pyscf_prep = prep.prep()
+
+            #print(pyscf_prep["header"]) 
+            #print(pyscf_prep["hcore"].shape) 
+            #print(pyscf_prep["amplitudes"]["ci1"].shape)
+            #pyscf_prep = utils.prep_afqmc(
+            #    self.mf_or_cc,
+            #    basis_coeff=self.basis_coeff,
+            #    norb_frozen=self.norb_frozen,
+            #    chol_cut=self.chol_cut,
+            #    integrals=self.integrals,
+            #    tmpdir=self.tmpdir,
+            #    write_to_disk=self.write_to_disk,
+            #)
+            #print(pyscf_prep["header"]) 
+            #print(pyscf_prep["hcore"].shape) 
+            #print(pyscf_prep["amplitudes"]["ci1"].shape)
         else:
             raise NotImplementedError(
                 "Nuclear gradients with AFQMC are not implemented yet."
             )
             # grad_utils.prep_afqmc_nuc_grad(self.mf_or_cc, self.dR, tmpdir=self.tmpdir)
-        options = self.make_options_dict()
 
         if dry_run:
             with open("tmpdir.txt", "w") as f:
