@@ -18,6 +18,7 @@ from pyscf.cc.uccsd import UCCSD
 from ad_afqmc import Wigner_small_d, hamiltonian, propagation, sampling, wavefunctions
 from ad_afqmc.config import mpi_print as print
 
+from ad_afqmc.prep import PrepAfqmc
 
 # modified cholesky for a given matrix
 def modified_cholesky(mat: np.ndarray, max_error: float = 1e-6) -> np.ndarray:
@@ -1279,6 +1280,7 @@ def read_options(options: Optional[Dict] = None, tmp_dir: str = ".") -> Dict:
 
 
 def get_options(options: Dict):
+
     # Set default values for options
     options["dt"] = options.get("dt", 0.01)
     options["n_walkers"] = options.get("n_walkers", 50)
@@ -1423,6 +1425,102 @@ def apply_symmetry_mask(ham_data: Dict, options: Dict) -> Dict:
 
     return ham_data
 
+def set_1rdm(
+    wave_data,
+    norb,
+    nelec_sp,
+    mo_coeff,
+    options_trial,
+    directory,
+    ):
+    # Try to read RDM1 from file
+    try:
+        rdm1 = jnp.array(np.load(directory + "/rdm1.npz")["rdm1"])
+        assert rdm1.shape == (2, norb, norb)
+        wave_data["rdm1"] = rdm1
+        print(f"# Read RDM1 from disk")
+    except:
+        # Construct RDM1 from mo_coeff if file not found
+        if options_trial in ["ghf_complex", "gcisd_complex"]:
+            wave_data["rdm1"] = jnp.array(
+                [
+                    mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]]
+                    @ mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]].T.conj(),
+                    mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]]
+                    @ mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]].T.conj(),
+                ]
+            )
+        else:
+            wave_data["rdm1"] = jnp.array(
+                [
+                    mo_coeff[0][:, : nelec_sp[0]] @ mo_coeff[0][:, : nelec_sp[0]].T,
+                    mo_coeff[1][:, : nelec_sp[1]] @ mo_coeff[1][:, : nelec_sp[1]].T,
+                ]
+            )
+
+    return wave_data
+
+def set_symmetry_projector(wave_data, nelec_sp, options):
+    if "s2_ghf" in options["symmetry_projector"]:
+        # only singlet projection supported for now
+        n_alpha = options.get("nalpha", 6)
+        alpha_vals = jnp.pi * (jnp.arange(n_alpha) + 0.5) / n_alpha
+        w_alpha = 1.0 / n_alpha
+        wave_data["alpha"] = (alpha_vals, w_alpha)
+
+        def make_beta_gl(n_beta: int):
+            x, w = leggauss(int(n_beta))
+            beta = np.arccos(x)
+            order = np.argsort(beta)
+            return beta[order], w[order]
+
+        n_beta = options.get("nbeta", 6)
+        beta_vals_np, w_beta_np = make_beta_gl(n_beta)
+        beta_vals = jnp.asarray(beta_vals_np)
+        w_beta = jnp.asarray(w_beta_np)
+        wave_data["beta"] = (beta_vals, w_beta)
+
+    elif "s2" in options["symmetry_projector"]:
+        # Gauss-Legendre
+        #
+        # \int_0^\pi sin(\beta) f(\beta) \dd\beta
+        # x = \cos(beta), \dd x = -\sin(beta)
+        # = \int_{-1}^{1} f(\arccos(x)) \dd x
+        # \approx \sum_{i=1}^n w_i f(\arccos(x_i))
+        #
+        S = options["target_spin"] / 2.0
+        Sz = (nelec_sp[0] - nelec_sp[1]) / 2.0
+        ngrid = options.get("s2_projector_ngrid", 4)
+
+        # Gauss–Legendre
+        x, w = leggauss(ngrid)
+        betas = jnp.arccos(x)  # map [-1, 1] to [0, pi]
+
+        # Wigner small-d matrix elements for each point
+        w_betas = (
+            jax.vmap(Wigner_small_d.wigner_small_d, (None, None, None, 0))(
+                S, Sz, Sz, betas
+            )
+            * w
+            * (2.0 * S + 1.0)
+            / 2.0
+        )
+
+        # betas = np.linspace(0, np.pi, ngrid, endpoint=False)
+        # w_betas = (
+        #    jax.vmap(Wigner_small_d.wigner_small_d, (None, None, None, 0))(
+        #        S, Sz, Sz, betas
+        #    )
+        #    * jnp.sin(betas)
+        #    * (2 * S + 1)
+        #    / 2.0
+        #    * jnp.pi
+        #    / ngrid
+        # )
+
+        wave_data["betas"] = (S, Sz, w_betas, betas)
+
+    return wave_data
 
 def set_trial(
     options: Dict,
@@ -1451,91 +1549,10 @@ def set_trial(
     directory = tmp_dir
     wave_data = {}
 
-    # Try to read RDM1 from file
-    try:
-        rdm1 = jnp.array(np.load(directory + "/rdm1.npz")["rdm1"])
-        assert rdm1.shape == (2, norb, norb)
-        wave_data["rdm1"] = rdm1
-        print(f"# Read RDM1 from disk")
-    except:
-        # Construct RDM1 from mo_coeff if file not found
-        if options_trial in ["ghf_complex", "gcisd_complex"]:
-            wave_data["rdm1"] = jnp.array(
-                [
-                    mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]]
-                    @ mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]].T.conj(),
-                    mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]]
-                    @ mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]].T.conj(),
-                ]
-            )
-
-        else:
-            wave_data["rdm1"] = jnp.array(
-                [
-                    mo_coeff[0][:, : nelec_sp[0]] @ mo_coeff[0][:, : nelec_sp[0]].T,
-                    mo_coeff[1][:, : nelec_sp[1]] @ mo_coeff[1][:, : nelec_sp[1]].T,
-                ]
-            )
+    wave_data = set_1rdm(wave_data, norb, nelec_sp, mo_coeff, options_trial, directory)
 
     if options.get("symmetry_projector", None) is not None:
-        if "s2_ghf" in options["symmetry_projector"]:
-            # only singlet projection supported for now
-            n_alpha = options.get("nalpha", 6)
-            alpha_vals = jnp.pi * (jnp.arange(n_alpha) + 0.5) / n_alpha
-            w_alpha = 1.0 / n_alpha
-            wave_data["alpha"] = (alpha_vals, w_alpha)
-
-            def make_beta_gl(n_beta: int):
-                x, w = leggauss(int(n_beta))
-                beta = np.arccos(x)
-                order = np.argsort(beta)
-                return beta[order], w[order]
-
-            n_beta = options.get("nbeta", 6)
-            beta_vals_np, w_beta_np = make_beta_gl(n_beta)
-            beta_vals = jnp.asarray(beta_vals_np)
-            w_beta = jnp.asarray(w_beta_np)
-            wave_data["beta"] = (beta_vals, w_beta)
-
-        elif "s2" in options["symmetry_projector"]:
-            # Gauss-Legendre
-            #
-            # \int_0^\pi sin(\beta) f(\beta) \dd\beta
-            # x = \cos(beta), \dd x = -\sin(beta)
-            # = \int_{-1}^{1} f(\arccos(x)) \dd x
-            # \approx \sum_{i=1}^n w_i f(\arccos(x_i))
-            #
-            S = options["target_spin"] / 2.0
-            Sz = (nelec_sp[0] - nelec_sp[1]) / 2.0
-            ngrid = options.get("s2_projector_ngrid", 4)
-
-            # Gauss–Legendre
-            x, w = leggauss(ngrid)
-            betas = jnp.arccos(x)  # map [-1, 1] to [0, pi]
-
-            # Wigner small-d matrix elements for each point
-            w_betas = (
-                jax.vmap(Wigner_small_d.wigner_small_d, (None, None, None, 0))(
-                    S, Sz, Sz, betas
-                )
-                * w
-                * (2.0 * S + 1.0)
-                / 2.0
-            )
-
-            # betas = np.linspace(0, np.pi, ngrid, endpoint=False)
-            # w_betas = (
-            #    jax.vmap(Wigner_small_d.wigner_small_d, (None, None, None, 0))(
-            #        S, Sz, Sz, betas
-            #    )
-            #    * jnp.sin(betas)
-            #    * (2 * S + 1)
-            #    / 2.0
-            #    * jnp.pi
-            #    / ngrid
-            # )
-
-            wave_data["betas"] = (S, Sz, w_betas, betas)
+        wave_data = set_symmetry_projector(wave_data, nelec_sp, options)
 
     # Set up trial wavefunction based on specified type
     if options_trial == "rhf":
@@ -1814,7 +1831,6 @@ def set_trial(
 
     return trial, wave_data
 
-
 def set_prop(options: Dict) -> Any:
     """
     Set up the propagator for AFQMC calculation.
@@ -1911,35 +1927,42 @@ def setup_afqmc(
     """
     directory = tmp_dir
 
-    h0, h1, chol, norb, nelec_sp = read_fcidump(directory)
-    options = read_options(options, directory)
-    observable = read_observable(norb, options, directory)
-    ham, ham_data = set_ham(norb, h0, h1, chol, options["ene0"])
-    ham_data = apply_symmetry_mask(ham_data, options)
-    mo_coeff = load_mo_coefficients(directory)
-    trial, wave_data = set_trial(
-        options, options["trial"], mo_coeff, norb, nelec_sp, directory
-    )
-    prop = set_prop(options)
-    sampler = set_sampler(options)
+    prep = PrepAfqmc()
+    prep.options = options
+    prep.path.options = directory
+    prep.path.fcidump = directory
+    prep.path.tmpdir = directory
+    prep.setup_afqmc(True)
 
-    print(f"# norb: {norb}")
-    print(f"# nelec: {nelec_sp}")
-    print("#")
-    for op in options:
-        if options[op] is not None:
-            print(f"# {op}: {options[op]}")
-    print("#")
+    #h0, h1, chol, norb, nelec_sp = read_fcidump(directory)
+    #options = read_options(options, directory)
+    #observable = read_observable(norb, options, directory)
+    #ham, ham_data = set_ham(norb, h0, h1, chol, options["ene0"])
+    #ham_data = apply_symmetry_mask(ham_data, options)
+    #mo_coeff = load_mo_coefficients(directory)
+    #trial, wave_data = set_trial(
+    #    options, options["trial"], mo_coeff, norb, nelec_sp, directory
+    #)
+    #prop = set_prop(options)
+    #sampler = set_sampler(options)
+
+    #print(f"# norb: {prep.mo_basis.norb}")
+    #print(f"# nelec: {(prep.mol.n_a, prep.mol.n_b)}")
+    #print("#")
+    #for op in prep.options:
+    #    if prep.options[op] is not None:
+    #        print(f"# {op}: {prep.options[op]}")
+    #print("#")
 
     return (
-        ham_data,
-        ham,
-        prop,
-        trial,
-        wave_data,
-        sampler,
-        observable,
-        options,
+        prep.tmp.ham_data,
+        prep.tmp.ham,
+        prep.tmp.prop,
+        prep.tmp.trial,
+        prep.tmp.wave_data,
+        prep.tmp.sampler,
+        prep.tmp.observable,
+        prep.options,
     )
 
 
@@ -1977,52 +2000,62 @@ def setup_afqmc_ph(
             options: Dictionary of calculation options
     """
     directory = tmp_dir
+
+    prep = PrepAfqmc()
+    prep.options = options
+    prep.path.tmpdir = directory
     if pyscf_prep is not None and options is not None:
-        [nelec, norb, ms, nchol] = pyscf_prep["header"]
-        h0 = jnp.array(pyscf_prep.get("energy_core"))
-        h1 = jnp.array(pyscf_prep.get("hcore")).reshape(norb, norb)
-        chol = jnp.array(pyscf_prep.get("chol")).reshape(-1, norb, norb)
-        assert type(ms) is np.int64
-        assert type(nelec) is np.int64
-        assert type(norb) is np.int64
-        ms, nelec, norb = int(ms), int(nelec), int(norb)
-        nelec_sp = ((nelec + abs(ms)) // 2, (nelec - abs(ms)) // 2)
-        mo_coeff = jnp.array(pyscf_prep["trial_coeffs"])
-        options = get_options(options)
+        prep.tmp.pyscf_prep = pyscf_prep
+        prep.setup_afqmc(False)
     else:
-        h0, h1, chol, norb, nelec_sp = read_fcidump(directory)
-        mo_coeff = load_mo_coefficients(directory)
-        options = read_options(options, directory)
-    observable = None  # read_observable(norb, options, directory)
-    ham, ham_data = set_ham(norb, h0, h1, chol, options["ene0"])
-    ham_data = apply_symmetry_mask(ham_data, options)
+        prep.setup_afqmc(True)
 
-    trial, wave_data = set_trial(
-        options, options["trial"], mo_coeff, norb, nelec_sp, directory, pyscf_prep
-    )
-    prop = set_prop(options)
-    sampler = set_sampler(options)
+    #if pyscf_prep is not None and options is not None:
+    #    [nelec, norb, ms, nchol] = pyscf_prep["header"]
+    #    h0 = jnp.array(pyscf_prep.get("energy_core"))
+    #    h1 = jnp.array(pyscf_prep.get("hcore")).reshape(norb, norb)
+    #    chol = jnp.array(pyscf_prep.get("chol")).reshape(-1, norb, norb)
+    #    assert type(ms) is np.int64
+    #    assert type(nelec) is np.int64
+    #    assert type(norb) is np.int64
+    #    ms, nelec, norb = int(ms), int(nelec), int(norb)
+    #    nelec_sp = ((nelec + abs(ms)) // 2, (nelec - abs(ms)) // 2)
+    #    mo_coeff = jnp.array(pyscf_prep["trial_coeffs"])
+    #    options = get_options(options)
+    #else:
+    #    h0, h1, chol, norb, nelec_sp = read_fcidump(directory)
+    #    mo_coeff = load_mo_coefficients(directory)
+    #    options = read_options(options, directory)
+    #observable = None  # read_observable(norb, options, directory)
+    #ham, ham_data = set_ham(norb, h0, h1, chol, options["ene0"])
+    #ham_data = apply_symmetry_mask(ham_data, options)
 
-    print(f"# norb: {norb}")
-    print(f"# nelec: {nelec_sp}")
-    print("#")
-    for op in options:
-        if options[op] is not None:
-            print(f"# {op}: {options[op]}")
-    print("#")
+    #trial, wave_data = set_trial(
+    #    options, options["trial"], mo_coeff, norb, nelec_sp, directory, pyscf_prep
+    #)
+    #prop = set_prop(options)
+    #sampler = set_sampler(options)
+
+    #print(f"# norb: {norb}")
+    #print(f"# nelec: {nelec_sp}")
+    #print("#")
+    #for op in options:
+    #    if options[op] is not None:
+    #        print(f"# {op}: {options[op]}")
+    #print("#")
 
     # Ensure type-narrowing for the returned options
     assert options is not None
 
     return (
-        ham_data,
-        ham,
-        prop,
-        trial,
-        wave_data,
-        sampler,
-        observable,
-        options,
+        prep.tmp.ham_data,
+        prep.tmp.ham,
+        prep.tmp.prop,
+        prep.tmp.trial,
+        prep.tmp.wave_data,
+        prep.tmp.sampler,
+        prep.tmp.observable,
+        prep.options,
     )
 
 
@@ -2050,46 +2083,53 @@ def setup_afqmc_fp(
     """
     directory = tmp_dir if tmp_dir is not None else tmpdir
 
-    h0, h1, chol, norb, nelec_sp = read_fcidump(directory)
-    options = read_options(options, directory)
-    observable = read_observable(norb, options, directory)
-    ham, ham_data = set_ham(norb, h0, h1, chol, options["ene0"])
-    ham_data = apply_symmetry_mask(ham_data, options)
-    mo_coeff = load_mo_coefficients(directory)
-    trial, wave_data = set_trial(
-        options, options["trial"], mo_coeff, norb, nelec_sp, directory
-    )
-    trial_ket, wave_data_ket = set_trial(
-        options,
-        options.get("trial_ket", options["trial"]),
-        mo_coeff,
-        norb,
-        nelec_sp,
-        directory,
-    )
-    prop = set_prop(options)
-    sampler = set_sampler(options)
+    prep = PrepAfqmc()
+    prep.options = options
+    prep.path.options = directory
+    prep.path.fcidump = directory
+    prep.path.tmpdir = directory
+    prep.setup_afqmc(True)
 
-    print(f"# norb: {norb}")
-    print(f"# nelec: {nelec_sp}")
-    print("#")
-    for op in options:
-        if options[op] is not None:
-            print(f"# {op}: {options[op]}")
-    print("#")
+    #h0, h1, chol, norb, nelec_sp = read_fcidump(directory)
+    #options = read_options(options, directory)
+    #observable = read_observable(norb, options, directory)
+    #ham, ham_data = set_ham(norb, h0, h1, chol, options["ene0"])
+    #ham_data = apply_symmetry_mask(ham_data, options)
+    #mo_coeff = load_mo_coefficients(directory)
+    #trial, wave_data = set_trial(
+    #    options, options["trial"], mo_coeff, norb, nelec_sp, directory
+    #)
+    #trial_ket, wave_data_ket = set_trial(
+    #    options,
+    #    options.get("trial_ket", options["trial"]),
+    #    mo_coeff,
+    #    norb,
+    #    nelec_sp,
+    #    directory,
+    #)
+    #prop = set_prop(options)
+    #sampler = set_sampler(options)
+
+    #print(f"# norb: {norb}")
+    #print(f"# nelec: {nelec_sp}")
+    #print("#")
+    #for op in options:
+    #    if options[op] is not None:
+    #        print(f"# {op}: {options[op]}")
+    #print("#")
 
     # Ensure type-narrowing for the returned options
     assert options is not None
 
     return (
-        ham_data,
-        ham,
-        prop,
-        trial,
-        wave_data,
-        trial_ket,
-        wave_data_ket,
-        sampler,
-        observable,
-        options,
+        prep.tmp.ham_data,
+        prep.tmp.ham,
+        prep.tmp.prop,
+        prep.tmp.trial,
+        prep.tmp.wave_data,
+        prep.tmp.trial_ket,
+        prep.tmp.wave_data_ket,
+        prep.tmp.sampler,
+        prep.tmp.observable,
+        prep.options,
     )

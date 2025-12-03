@@ -19,6 +19,7 @@ options = {
 "seed": 8,
 "trial": "",
 "walker_type": "",
+"tmpdir": tmpdir,
 }
 
 def check(obj, options, e, atol, mpi):
