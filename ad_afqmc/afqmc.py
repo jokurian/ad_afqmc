@@ -393,7 +393,12 @@ class AFQMC:
             prep.tmp.mol = mol
             prep.mol.spin = mol.spin
             prep.mol.n_a, prep.mol.n_b = mol.nelec
-            prep.tmp.mf_or_cc = self.mf_or_cc
+            if isinstance(self.mf_or_cc, (CCSD, UCCSD)):
+                prep.tmp.cc = self.mf_or_cc
+                prep.tmp.mf = self.mf_or_cc._scf
+            else:
+                prep.tmp.mf = self.mf_or_cc
+            prep.mo_basis.norb_frozen = self.norb_frozen
             # Super dirty
             if self.basis_coeff == None:
                 if isinstance(self.mf_or_cc, (scf.uhf.UHF, UCCSD)):

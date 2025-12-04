@@ -104,9 +104,6 @@ class PrepAfqmc:
     def apply_symmetry_mask(self):
         self.tmp.ham_data = utils.apply_symmetry_mask(self.tmp.ham_data, self.options)
 
-    def load_mo_coefficients(self):
-        self.mo_basis.trial_coeff = utils.load_mo_coefficients(self.path.tmpdir)
-
     def set_trial(self):
         self.tmp.trial, self.tmp.wave_data = utils.set_trial(
             self.options,
@@ -134,7 +131,25 @@ class PrepAfqmc:
     def set_sampler(self):
         self.tmp.sampler = utils.set_sampler(self.options)
 
+    #################
+    ### Integrals ###
+    #################
+    # TODO add asserts
     def set_integrals(self):
+        # Read integrals from disk
+        if self.io.fcidump == IO.Read():
+            self.read_fcidump()
+        # Compute them
+        else:
+            if self.mo_basis.chol == None:
+                self.compute_integrals()
+
+        # Write integrals to disk
+        if self.io.fcidump == IO.Write():
+            self.write_fcidump()
+            self.io.fcidump = IO.Read()
+
+    def compute_integrals(self):
         # TODO the function compute_cholesky_integrals should be split
         # mol and mf should be removed
         h1e, chol, nelec, enuc, _, _ = utils.compute_cholesky_integrals(
@@ -164,26 +179,6 @@ class PrepAfqmc:
         self.mo_basis.h1_mod = h1e_mod
         self.mo_basis.chol = chol
 
-    def set_trial_coeff(self):
-        self.mo_basis.trial_coeff = utils.get_trial_coeffs(
-            self.tmp.mol, # TODO Remove, only needed for the overlap
-            self.tmp.mf, # TODO Replace with MoType
-            self.mo_basis.basis_coeff,
-            self.mo_basis.norb,
-            self.mo_basis.norb_frozen,
-        )
-
-    # TODO write should only write them
-    def write_trial_coeff(self):
-        utils.write_trial_coeffs(
-            self.tmp.mol,
-            self.tmp.mf,
-            self.mo_basis.basis_coeff,
-            self.mo_basis.norb,
-            self.mo_basis.norb_frozen,
-            self.path.tmpdir,
-        )
-
     def write_fcidump(self):
         utils.write_dqmc(
             self.mo_basis.h1,
@@ -197,6 +192,62 @@ class PrepAfqmc:
             mo_coeffs=self.mo_basis.trial_coeff,
         )
 
+    ###################
+    ### Trial coeff ###
+    ###################
+    # TODO add asserts
+    def set_trial_coeff(self):
+        # Read
+        if self.io.trial_coeff == IO.Read():
+            self.load_mo_coeff() # Shouldn't be call mo_coeff...
+        # Compute
+        else:
+            if self.mo_basis.trial_coeff == None:
+                self.mo_basis.trial_coeff = utils.get_trial_coeffs(
+                    self.tmp.mol, # TODO Remove, only needed for the overlap
+                    self.tmp.mf, # TODO Replace with MoType
+                    self.mo_basis.basis_coeff,
+                    self.mo_basis.norb,
+                    self.mo_basis.norb_frozen,
+                )
+        # Write
+        if self.io.trial_coeff == IO.Write():
+            self.write_trial_coeff()
+            self.io.trial_coeff = IO.Read()
+
+    def load_mo_coefficients(self):
+        self.mo_basis.trial_coeff = utils.load_mo_coefficients(self.path.tmpdir)
+
+    # TODO write should only write them
+    def write_trial_coeff(self):
+        utils.write_trial_coeffs(
+            self.tmp.mol,
+            self.tmp.mf,
+            self.mo_basis.basis_coeff,
+            self.mo_basis.norb,
+            self.mo_basis.norb_frozen,
+            self.path.tmpdir,
+        )
+
+    ##################
+    ### Amplitudes ###
+    ##################
+    def set_amplitudes(self):
+        if not hasattr(self.tmp, "cc"): return
+
+        # Read
+        if self.io.amplitudes == IO.Read():
+            # path should also contain the filename
+            self.tmp.amplitudes = np.load(self.path.amplitudes + "/amplitudes.npz")
+        # Compute
+        else:
+            if not hasattr(self.tmp, "amplitudes"): # Super dirty
+                self.set_ci_from_cc()
+        # Write
+        if self.io.amplitudes == IO.Write():
+            self.write_pyscf_ccsd()
+            self.io.amplitudes = IO.Read()
+
     def set_ci_from_cc(self):
         self.tmp.amplitudes = utils.get_ci_amplitudes_from_cc(self.tmp.cc)
 
@@ -205,34 +256,24 @@ class PrepAfqmc:
         if hasattr(self.tmp, "cc"): # Super dirty
             utils.write_pyscf_ccsd(self.tmp.cc, self.path.tmpdir)
 
-    # TODO cleaner
-    def set_ci_cc(self):
-        from pyscf.cc.ccsd import CCSD
-        from pyscf.cc.uccsd import UCCSD
-        if isinstance(self.tmp.mf_or_cc, (CCSD, UCCSD)):
-            self.tmp.cc = self.tmp.mf_or_cc
-            self.set_ci_from_cc()
-            self.tmp.mf = self.tmp.mf_or_cc._scf
-            if self.tmp.mf_or_cc.frozen is not None:
-                assert (
-                    type(self.tmp.mf_or_cc.frozen) is int
-                ), "Frozen orbitals should be given as an integer."
-                norb_frozen = self.tmp.mf_or_cc.frozen
-            else:
-                norb_frozen = 0
-            self.mo_basis.norb_frozen = norb_frozen
-        else:
-            self.tmp.mf = self.tmp.mf_or_cc
-
     def prep(self):
-        self.set_ci_cc()
+        if self.tmp.write_to_disk:
+            self.io.fcidump = IO.Write()
+            self.io.amplitudes = IO.Write()
+            self.io.trial_coeff = IO.Write()
+
+        self.set_amplitudes()
         self.set_integrals() 
         self.set_trial_coeff()
+ 
+        #self.set_ci_cc()
+        #self.set_integrals()
+        #self.set_trial_coeff()
 
-        if self.tmp.write_to_disk:
-            self.write_pyscf_ccsd()
-            self.write_fcidump()
-            self.write_trial_coeff()
+        #if self.tmp.write_to_disk:
+        #    self.write_pyscf_ccsd()
+        #    self.write_fcidump()
+        #    self.write_trial_coeff()
 
         pyscf_prep = {}
 
@@ -246,8 +287,8 @@ class PrepAfqmc:
         pyscf_prep["hcore_mod"] = self.mo_basis.h1_mod.flatten()
         pyscf_prep["chol"] = self.mo_basis.chol.flatten()
         pyscf_prep["energy_core"] = self.mo_basis.h0
-        if self.mo_basis.trial_coeff is not None:
-            pyscf_prep["trial_coeffs"] = self.mo_basis.trial_coeff
+        #if self.mo_basis.trial_coeff is not None:
+        pyscf_prep["trial_coeffs"] = self.mo_basis.trial_coeff
         if hasattr(self.tmp, "amplitudes"): # Super dirty
             pyscf_prep["amplitudes"] = self.tmp.amplitudes
 
@@ -313,23 +354,29 @@ class Trial:
         self.walker = None
 
     class Bra:
-        class Rhf: pass
-        class Uhf: pass
-        class Cisd: pass
-        class Ucisd: pass
+        class RHF: pass
+        class UHF: pass
+        class GHF: pass
+        class GHFComplex: pass
+        class NOCI: pass
+        class CISD: pass
+        class UCISD: pass
+        class GCISD: pass
+        class PKL: pass
     
     class Ket:
-        class Rhf: pass
-        class Uhf: pass
-        class Cisd: pass
-        class Ucisd: pass
+        class RHF: pass
+        class UHF: pass
+        class GHF: pass
+        class CCSD: pass
+        class UCCSD: pass
     
     class Walker:
         class Restricted: pass
         class Unrestricted: pass
         class Generalized: pass
 
-class Ci:
+class CI:
     def __init__(self):
         self.type = None
         c1 = None
@@ -339,7 +386,7 @@ class Ci:
     class Unrestricted: pass
     class Generalized: pass
 
-class Cc:
+class CC:
     def __init__(self):
         self.type = None
         t1 = None
@@ -350,12 +397,20 @@ class Cc:
     class Generalized: pass
 
 class IO:
-    __slots__ = ("options", "fcidump", "amplitudes")
+    __slots__ = ("options", "fcidump", "amplitudes", "trial_coeff")
 
     def __init__(self):
-        self.options = None
-        self.fcidump = None
-        self.amplitudes = None
+        self.options = self.NoIO()
+        self.fcidump = self.NoIO()
+        self.amplitudes = self.NoIO()
+        self.trial_coeff = self.NoIO()
 
-    class Read: pass
-    class Write: pass
+    class NoIO:
+        def __eq__(self, other):
+            return isinstance(other, IO.NoIO)
+    class Read:
+        def __eq__(self, other):
+            return isinstance(other, IO.Read)
+    class Write:
+        def __eq__(self, other):
+            return isinstance(other, IO.Write)
