@@ -4,7 +4,7 @@ from ad_afqmc import utils
 class PrepAfqmc:
     __slots__ = (
         "mol", "ao_basis", "mo_basis", "options",
-        "ci", "cc", "trial", "path", "tmp",
+        "ci", "cc", "trial", "path", "tmp", "io"
     )
     def __init__(self):
         self.mol = Mol()
@@ -16,6 +16,7 @@ class PrepAfqmc:
         self.trial = None
         self.path = Path()
         self.tmp = Dummy()
+        self.io = IO()
 
     def setup_afqmc(self, from_disk):
         if from_disk:
@@ -348,3 +349,13 @@ class Cc:
     class Unrestricted: pass
     class Generalized: pass
 
+class IO:
+    __slots__ = ("options", "fcidump", "amplitudes")
+
+    def __init__(self):
+        self.options = None
+        self.fcidump = None
+        self.amplitudes = None
+
+    class Read: pass
+    class Write: pass
