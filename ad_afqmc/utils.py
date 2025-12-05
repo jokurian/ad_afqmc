@@ -911,12 +911,22 @@ def get_ci_amplitudes_from_cc(cc):
             "ci2aa": ci2aa,
             "ci2ab": ci2ab,
             "ci2bb": ci2bb,
+            "t1a": cc.t1[0],
+            "t1b": cc.t1[1],
+            "t2aa": cc.t2[0],
+            "t2ab": cc.t2[1],
+            "t2bb": cc.t2[2],
         }
     else:
         ci2 = cc.t2 + np.einsum("ia,jb->ijab", np.array(cc.t1), np.array(cc.t1))
         ci2 = ci2.transpose(0, 2, 1, 3)
         ci1 = np.array(cc.t1)
-        return {"ci1": ci1, "ci2": ci2}
+        return {
+            "ci1": ci1,
+            "ci2": ci2,
+            "t1": cc.t1,
+            "t2": cc.t2,
+        }
 
 
 def write_pyscf_ccsd(cc, tmpdir):
@@ -1241,6 +1251,7 @@ def read_fcidump(tmp_dir: str = ".") -> Tuple:
         [nelec, norb, ms, nchol] = fh5["header"]
         h0 = jnp.array(fh5.get("energy_core"))
         h1 = jnp.array(fh5.get("hcore")).reshape(norb, norb)
+        h1_mod = jnp.array(fh5.get("hcore_mod")).reshape(norb, norb)
         chol = jnp.array(fh5.get("chol")).reshape(-1, norb, norb)
 
     assert type(ms) is np.int64
@@ -1251,7 +1262,7 @@ def read_fcidump(tmp_dir: str = ".") -> Tuple:
     # Calculate electrons per spin channel
     nelec_sp = ((nelec + abs(ms)) // 2, (nelec - abs(ms)) // 2)
 
-    return h0, h1, chol, norb, nelec_sp
+    return h0, h1, h1_mod, chol, norb, nelec_sp
 
 
 def read_options(options: Optional[Dict] = None, tmp_dir: str = ".") -> Dict:
@@ -1594,6 +1605,7 @@ def set_trial(
 
     elif options_trial == "cisd":
         try:
+            print(pyscf_prep.keys())
             if pyscf_prep is not None and "amplitudes" in pyscf_prep:
                 amplitudes = pyscf_prep["amplitudes"]
             else:
@@ -1932,7 +1944,14 @@ def setup_afqmc(
     prep.path.options = directory
     prep.path.fcidump = directory
     prep.path.tmpdir = directory
-    prep.setup_afqmc(True)
+    #prep.setup_afqmc(True)
+    #prep.tmp.write_to_disk = True
+    prep.io.read_options()
+    prep.io.read_fcidump()
+    prep.io.read_trial_coeff()
+    prep.io.read_amplitudes()
+
+    prep.setup_afqmc()
 
     #h0, h1, chol, norb, nelec_sp = read_fcidump(directory)
     #options = read_options(options, directory)
@@ -2006,9 +2025,21 @@ def setup_afqmc_ph(
     prep.path.tmpdir = directory
     if pyscf_prep is not None and options is not None:
         prep.tmp.pyscf_prep = pyscf_prep
-        prep.setup_afqmc(False)
+        #prep.setup_afqmc(False)
+        #prep.tmp.write_to_disk = False
+        prep.io.no_io_options()
+        prep.io.no_io_fcidump()
+        prep.io.no_io_trial_coeff()
+        prep.io.no_io_amplitudes()
+        prep.setup_afqmc()
     else:
-        prep.setup_afqmc(True)
+        #prep.setup_afqmc(True)
+        #prep.tmp.write_to_disk = True
+        prep.io.read_options()
+        prep.io.read_fcidump()
+        prep.io.read_trial_coeff()
+        prep.io.read_amplitudes()
+        prep.setup_afqmc()
 
     #if pyscf_prep is not None and options is not None:
     #    [nelec, norb, ms, nchol] = pyscf_prep["header"]
@@ -2088,7 +2119,13 @@ def setup_afqmc_fp(
     prep.path.options = directory
     prep.path.fcidump = directory
     prep.path.tmpdir = directory
-    prep.setup_afqmc(True)
+    #prep.setup_afqmc(True)
+    #prep.tmp.write_to_disk = True
+    prep.io.read_options()
+    prep.io.read_fcidump()
+    prep.io.read_trial_coeff()
+    prep.io.read_amplitudes()
+    prep.setup_afqmc()
 
     #h0, h1, chol, norb, nelec_sp = read_fcidump(directory)
     #options = read_options(options, directory)

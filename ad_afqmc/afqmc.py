@@ -110,13 +110,14 @@ def run_afqmc(
     return ene_err[0], ene_err[1]
 
 
-def run_afqmc_ph(
-    pyscf_prep: Optional[dict] = None,
-    options: Optional[dict] = None,
-    mpi_prefix: Optional[str] = None,
-    nproc: Optional[int] = None,
-    tmpdir: Optional[str] = None,
-):
+def run_afqmc_ph(prep):
+#def run_afqmc_ph(
+#    pyscf_prep: Optional[dict] = None,
+#    options: Optional[dict] = None,
+#    mpi_prefix: Optional[str] = None,
+#    nproc: Optional[int] = None,
+#    tmpdir: Optional[str] = None,
+#):
     """
     Run AFQMC calculation from pre-generated input files.
 
@@ -132,16 +133,31 @@ def run_afqmc_ph(
     """
     config.setup_jax()
     comm = config.setup_comm()
+    #(
+    #    ham_data,
+    #    ham,
+    #    prop,
+    #    trial,
+    #    wave_data,
+    #    sampler,
+    #    observable,
+    #    options,
+    #) = utils.setup_afqmc_ph(pyscf_prep, options)
+
+    prep.setup_afqmc()
     (
         ham_data,
         ham,
         prop,
         trial,
         wave_data,
+        _,
+        _,
         sampler,
         observable,
         options,
-    ) = utils.setup_afqmc_ph(pyscf_prep, options)
+    ) = prep.get_setup_data()
+
     e_afqmc, err_afqmc = driver.afqmc(
         ham_data,
         ham,
@@ -156,9 +172,24 @@ def run_afqmc_ph(
     return e_afqmc, err_afqmc
 
 
-def run_afqmc_fp(options=None, script=None, mpi_prefix=None, nproc=None, tmpdir=None):
+#def run_afqmc_fp(options=None, script=None, mpi_prefix=None, nproc=None, tmpdir=None):
+def run_afqmc_fp(prep):
     config.setup_jax()
     comm = config.setup_comm()
+    #(
+    #    ham_data,
+    #    ham,
+    #    prop,
+    #    trial,
+    #    wave_data,
+    #    trial_ket,
+    #    wave_data_ket,
+    #    sampler,
+    #    observable,
+    #    options,
+    #) = utils.setup_afqmc_fp(options, options["tmpdir"])
+
+    prep.setup_afqmc()
     (
         ham_data,
         ham,
@@ -170,7 +201,7 @@ def run_afqmc_fp(options=None, script=None, mpi_prefix=None, nproc=None, tmpdir=
         sampler,
         observable,
         options,
-    ) = utils.setup_afqmc_fp(options, options["tmpdir"])
+    ) = prep.get_setup_data()
 
     if (
         options["symmetry_projector"] == "s2"
@@ -393,9 +424,13 @@ class AFQMC:
             prep.tmp.mol = mol
             prep.mol.spin = mol.spin
             prep.mol.n_a, prep.mol.n_b = mol.nelec
+            # Super dirty and bad
             if isinstance(self.mf_or_cc, (CCSD, UCCSD)):
                 prep.tmp.cc = self.mf_or_cc
                 prep.tmp.mf = self.mf_or_cc._scf
+            elif isinstance(self.mf_or_cc_ket, (CCSD, UCCSD)):
+                prep.tmp.cc = self.mf_or_cc_ket
+                prep.tmp.mf = self.mf_or_cc_ket._scf
             else:
                 prep.tmp.mf = self.mf_or_cc
             prep.mo_basis.norb_frozen = self.norb_frozen
@@ -409,15 +444,30 @@ class AFQMC:
                 prep.mo_basis.basis_coeff = self.basis_coeff
             prep.mo_basis.norb_frozen = self.norb_frozen
             prep.mo_basis.chol_cut = self.chol_cut
+            prep.path.options = self.tmpdir
             prep.path.tmpdir = self.tmpdir
             prep.path.fcidump = self.tmpdir
+            prep.path.amplitudes = self.tmpdir
+            prep.options = options
+            prep.tmp.pyscf_prep = None
             # Dirty
             if self.free_projection:
                 prep.tmp.write_to_disk = True
             else:
                 prep.tmp.write_to_disk = self.write_to_disk
-                
-            pyscf_prep = prep.prep()
+            if self.write_to_disk:
+                prep.io.write_options()
+                prep.io.write_fcidump()
+                prep.io.write_trial_coeff()
+                prep.io.write_amplitudes()
+            else:
+                prep.io.no_io_options()
+                prep.io.no_io_fcidump()
+                prep.io.no_io_trial_coeff()
+                prep.io.no_io_amplitudes()
+
+            prep.prep()
+            #pyscf_prep = prep.prep()
 
             #print(pyscf_prep["header"]) 
             #print(pyscf_prep["hcore"].shape) 
@@ -447,24 +497,26 @@ class AFQMC:
                 pickle.dump(options, f)
             return self.tmpdir
         elif options["free_projection"]:
-            # run_afqmc.optimize_trial(options)
-            if (self.mf_or_cc_ket != self.mf_or_cc) and (
-                isinstance(self.mf_or_cc_ket, UCCSD)
-                or isinstance(self.mf_or_cc_ket, CCSD)
-            ):
-                utils.write_pyscf_ccsd(self.mf_or_cc_ket, options["tmpdir"])
-            # options=None, script=None, mpi_prefix=None, nproc=None
-            return run_afqmc_fp(
-                options=options,
-                mpi_prefix=self.mpi_prefix,
-                nproc=self.nproc,
-                tmpdir=self.tmpdir,
-            )
+            ## run_afqmc.optimize_trial(options)
+            #if (self.mf_or_cc_ket != self.mf_or_cc) and (
+            #    isinstance(self.mf_or_cc_ket, UCCSD)
+            #    or isinstance(self.mf_or_cc_ket, CCSD)
+            #):
+            #    utils.write_pyscf_ccsd(self.mf_or_cc_ket, options["tmpdir"])
+            ## options=None, script=None, mpi_prefix=None, nproc=None
+            #return run_afqmc_fp(
+            #    options=options,
+            #    mpi_prefix=self.mpi_prefix,
+            #    nproc=self.nproc,
+            #    tmpdir=self.tmpdir,
+            #)
+            return run_afqmc_fp(prep)
         else:
-            return run_afqmc_ph(
-                pyscf_prep=pyscf_prep,
-                options=options,
-                mpi_prefix=self.mpi_prefix,
-                nproc=self.nproc,
-                tmpdir=self.tmpdir,
-            )
+            return run_afqmc_ph(prep)
+            #return run_afqmc_ph(
+            #    pyscf_prep=pyscf_prep,
+            #    options=options,
+            #    mpi_prefix=self.mpi_prefix,
+            #    nproc=self.nproc,
+            #    tmpdir=self.tmpdir,
+            #)

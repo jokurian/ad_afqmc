@@ -30,6 +30,7 @@ def check(obj, options, e, atol, mpi):
     #utils.prep_afqmc(obj, tmpdir=tmpdir, chol_cut=1e-12, write_to_disk=True)
     pyscf_prep = utils.prep_afqmc(obj, tmpdir=tmpdir, chol_cut=1e-12, write_to_disk=False)
 
+    print(pyscf_prep.keys())
     if mpi:
         mpi_prefix = "mpirun "
         nproc = 2

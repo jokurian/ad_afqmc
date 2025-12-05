@@ -57,6 +57,7 @@ def prep(obj, target_spin):
     af.symmetry_projector = "s2"
     af.target_spin = target_spin
     af.tmpdir = "."
+    af.free_projection = True
     af.write_to_disk = True
     af.kernel(dry_run=True)
 
