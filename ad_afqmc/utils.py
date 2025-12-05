@@ -1941,16 +1941,8 @@ def setup_afqmc(
 
     prep = PrepAfqmc()
     prep.options = options
-    prep.path.options = directory
-    prep.path.fcidump = directory
-    prep.path.tmpdir = directory
-    #prep.setup_afqmc(True)
-    #prep.tmp.write_to_disk = True
-    prep.io.read_options()
-    prep.io.read_fcidump()
-    prep.io.read_trial_coeff()
-    prep.io.read_amplitudes()
-
+    prep.path.set(directory)
+    prep.io.set_read()
     prep.setup_afqmc()
 
     #h0, h1, chol, norb, nelec_sp = read_fcidump(directory)
@@ -2022,23 +2014,14 @@ def setup_afqmc_ph(
 
     prep = PrepAfqmc()
     prep.options = options
-    prep.path.tmpdir = directory
+    prep.path.set(directory)
+
     if pyscf_prep is not None and options is not None:
         prep.tmp.pyscf_prep = pyscf_prep
-        #prep.setup_afqmc(False)
-        #prep.tmp.write_to_disk = False
-        prep.io.no_io_options()
-        prep.io.no_io_fcidump()
-        prep.io.no_io_trial_coeff()
-        prep.io.no_io_amplitudes()
+        prep.io.set_no_io()
         prep.setup_afqmc()
     else:
-        #prep.setup_afqmc(True)
-        #prep.tmp.write_to_disk = True
-        prep.io.read_options()
-        prep.io.read_fcidump()
-        prep.io.read_trial_coeff()
-        prep.io.read_amplitudes()
+        prep.io.set_read()
         prep.setup_afqmc()
 
     #if pyscf_prep is not None and options is not None:
@@ -2116,15 +2099,8 @@ def setup_afqmc_fp(
 
     prep = PrepAfqmc()
     prep.options = options
-    prep.path.options = directory
-    prep.path.fcidump = directory
-    prep.path.tmpdir = directory
-    #prep.setup_afqmc(True)
-    #prep.tmp.write_to_disk = True
-    prep.io.read_options()
-    prep.io.read_fcidump()
-    prep.io.read_trial_coeff()
-    prep.io.read_amplitudes()
+    prep.path.set(directory)
+    prep.io.set_read()
     prep.setup_afqmc()
 
     #h0, h1, chol, norb, nelec_sp = read_fcidump(directory)

@@ -456,15 +456,9 @@ class AFQMC:
             else:
                 prep.tmp.write_to_disk = self.write_to_disk
             if self.write_to_disk:
-                prep.io.write_options()
-                prep.io.write_fcidump()
-                prep.io.write_trial_coeff()
-                prep.io.write_amplitudes()
+                prep.io.set_write()
             else:
-                prep.io.no_io_options()
-                prep.io.no_io_fcidump()
-                prep.io.no_io_trial_coeff()
-                prep.io.no_io_amplitudes()
+                prep.io.set_no_io()
 
             prep.prep()
             #pyscf_prep = prep.prep()

@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pickle
 from ad_afqmc import utils
@@ -33,19 +34,7 @@ class PrepAfqmc:
             self.options,
         )
 
-    def setup_afqmc(self): #, from_disk):
-        #if from_disk:
-        #    assert self.path.options != None
-        #    assert self.path.fcidump != None
-        #    assert self.path.tmpdir  != None
-        #    self.read_options()
-        #    self.read_fcidump()
-        #    self.read_observable()
-        #    self.load_mo_coefficients()
-        #    self.tmp.pyscf_prep = None
-        #else:
-        #    self.from_pyscf_prep()
-
+    def setup_afqmc(self):
         self.from_pyscf_prep()
 
         self.set_options()
@@ -71,10 +60,57 @@ class PrepAfqmc:
                 print(f"# {op}: {self.options[op]}")
         print("#")
 
+    def read_observable(self):
+        self.tmp.observable = utils.read_observable(
+            self.mo_basis.norb,
+            self.options,
+            self.path.tmpdir,
+        )
+
+    def set_ham(self):
+        mo = self.mo_basis
+        mol = self.mol
+        ham, ham_data = utils.set_ham(mo.norb, mo.h0, mo.h1, mo.chol, mol.ene0)
+        self.tmp.ham = ham
+        self.tmp.ham_data = ham_data
+
+    def apply_symmetry_mask(self):
+        self.tmp.ham_data = utils.apply_symmetry_mask(self.tmp.ham_data, self.options)
+
+    def set_trial(self):
+        self.tmp.trial, self.tmp.wave_data = utils.set_trial(
+            self.options,
+            self.options["trial"], # TODO trial
+            self.mo_basis.trial_coeff,
+            self.mo_basis.norb,
+            self.mo_basis.nelec_sp,
+            self.path.tmpdir,
+            self.tmp.pyscf_prep,
+        )
+        if "trial_ket" in self.options:
+            self.tmp.trial_ket, self.tmp.wave_data_ket = utils.set_trial(
+                self.options,
+                self.options["trial_ket"], # TODO trial
+                self.mo_basis.trial_coeff,
+                self.mo_basis.norb,
+                self.mo_basis.nelec_sp,
+                self.path.tmpdir,
+                self.tmp.pyscf_prep,
+            )
+
+    def set_prop(self):
+        self.tmp.prop = utils.set_prop(self.options)
+
+    def set_sampler(self):
+        self.tmp.sampler = utils.set_sampler(self.options)
+
+    ##################
+    ### pyscf_prep ###
+    ##################
     def from_pyscf_prep(self):
         if not hasattr(self.tmp, "pyscf_prep"): return
         if self.tmp.pyscf_prep is None: return
-        assert self.options is not None
+
         [nelec, norb, ms, nchol] = self.tmp.pyscf_prep["header"]
         h0 = np.array(self.tmp.pyscf_prep.get("energy_core"))
         h1 = np.array(self.tmp.pyscf_prep.get("hcore")).reshape(norb, norb)
@@ -121,19 +157,25 @@ class PrepAfqmc:
 
         return pyscf_prep
 
-
+    ###############
+    ### Options ###
+    ###############
     def set_options(self):
-        if self.io.options == IO.Read():
+        io = self.io.options
+        # Read
+        if io == IO.Read:
             self.read_options()
-        elif self.io.options == IO.Write() or self.io.options == IO.NoIO():
+        # Compute
+        elif io == IO.Write or io == IO.NoIO:
             self.options = utils.get_options(self.options)
             self.mol.ene0 = self.options["ene0"]
         else:
-            kabooom
+            raise TypeError(f"self.io.options is '{io}' instead of IO.Read/Write/NoIO.")
 
-        if self.io.options == IO.Write():
+        # Write
+        if io == IO.Write:
             self.write_options()
-            self.io.write_options()
+            self.io.set_read_options()
 
     def read_options(self):
         self.options = utils.read_options(self.options, self.path.options)
@@ -144,78 +186,26 @@ class PrepAfqmc:
         with open(self.path.options+"/options.bin", "wb") as f:
             pickle.dump(self.options, f)
 
-    def read_fcidump(self):
-        h0, h1, h1_mod, chol, norb, nelec_sp = utils.read_fcidump(self.path.fcidump)
-        self.mo_basis.norb = norb
-        self.mo_basis.h0 = h0
-        self.mo_basis.h1 = h1
-        self.mo_basis.h1_mod = h1_mod
-        self.mo_basis.chol = chol
-        self.mo_basis.nelec_sp = nelec_sp
-
-    def read_observable(self):
-        self.tmp.observable = utils.read_observable(
-            self.mo_basis.norb,
-            self.options,
-            self.path.tmpdir,
-        )
-
-    def set_ham(self):
-        mo = self.mo_basis
-        mol = self.mol
-        ham, ham_data = utils.set_ham(mo.norb, mo.h0, mo.h1, mo.chol, mol.ene0)
-        self.tmp.ham = ham
-        self.tmp.ham_data = ham_data
-
-    def apply_symmetry_mask(self):
-        self.tmp.ham_data = utils.apply_symmetry_mask(self.tmp.ham_data, self.options)
-
-    def set_trial(self):
-        self.tmp.trial, self.tmp.wave_data = utils.set_trial(
-            self.options,
-            self.options["trial"], # TODO trial
-            self.mo_basis.trial_coeff,
-            self.mo_basis.norb,
-            self.mo_basis.nelec_sp,
-            self.path.tmpdir,
-            self.tmp.pyscf_prep,
-        )
-        if "trial_ket" in self.options:
-            self.tmp.trial_ket, self.tmp.wave_data_ket = utils.set_trial(
-                self.options,
-                self.options["trial_ket"], # TODO trial
-                self.mo_basis.trial_coeff,
-                self.mo_basis.norb,
-                self.mo_basis.nelec_sp,
-                self.path.tmpdir,
-                self.tmp.pyscf_prep,
-            )
-
-    def set_prop(self):
-        self.tmp.prop = utils.set_prop(self.options)
-
-    def set_sampler(self):
-        self.tmp.sampler = utils.set_sampler(self.options)
-
     #################
     ### Integrals ###
     #################
     # TODO add asserts
     def set_integrals(self):
-        # Read integrals from disk
-        if self.io.fcidump == IO.Read():
+        io = self.io.fcidump
+        # Read
+        if io == IO.Read:
             self.read_fcidump()
-        # Compute them
-        elif self.io.fcidump == IO.Write() or self.io.fcidump == IO.NoIO():
+        # Compute
+        elif io == IO.Write or io == IO.NoIO:
             if self.mo_basis.chol is None:
                 self.compute_integrals()
         else:
-            kabooom
+            raise TypeError(f"self.io.fcidump is '{io}' instead of IO.Read/Write/NoIO.")
 
-        # Write integrals to disk
-        if self.io.fcidump == IO.Write():
+        # Write
+        if self.io.fcidump == IO.Write:
             self.write_fcidump()
-            self.io.fcidump = IO.Read()
+            self.io.set_read_fcidump()
 
     def compute_integrals(self):
         # TODO the function compute_cholesky_integrals should be split
@@ -246,6 +236,15 @@ class PrepAfqmc:
         self.mo_basis.h1_mod = h1e_mod
         self.mo_basis.chol = chol
 
+    def read_fcidump(self):
+        h0, h1, h1_mod, chol, norb, nelec_sp = utils.read_fcidump(self.path.fcidump)
+        self.mo_basis.norb = norb
+        self.mo_basis.h0 = h0
+        self.mo_basis.h1 = h1
+        self.mo_basis.h1_mod = h1_mod
+        self.mo_basis.chol = chol
+        self.mo_basis.nelec_sp = nelec_sp
+
     def write_fcidump(self):
         utils.write_dqmc(
             self.mo_basis.h1,
@@ -264,11 +263,12 @@ class PrepAfqmc:
     ###################
     # TODO add asserts
     def set_trial_coeff(self):
+        io = self.io.trial_coeff
         # Read
-        if self.io.trial_coeff == IO.Read():
-            self.load_mo_coefficients() # Shouldn't be call mo_coeff...
+        if io == IO.Read:
+            self.read_trial_coeff()
         # Compute
-        elif self.io.trial_coeff == IO.Write() or self.io.trial_coeff == IO.NoIO():
+        elif io == IO.Write or io == IO.NoIO:
             if self.mo_basis.trial_coeff is None:
                 self.mo_basis.trial_coeff = utils.get_trial_coeffs(
                     self.tmp.mol, # TODO Remove, only needed for the overlap
@@ -278,13 +278,14 @@ class PrepAfqmc:
                     self.mo_basis.norb_frozen,
                 )
         else:
-            kabooom
-        # Write
-        if self.io.trial_coeff == IO.Write():
-            self.write_trial_coeff()
-            self.io.trial_coeff = IO.Read()
+            raise TypeError(f"self.io.trial_coeff is '{io}' instead of IO.Read/Write/NoIO.")
 
-    def load_mo_coefficients(self):
+        # Write
+        if self.io.trial_coeff == IO.Write:
+            self.write_trial_coeff()
+            self.io.set_read_trial_coeff()
+
+    def read_trial_coeff(self):
         self.mo_basis.trial_coeff = utils.load_mo_coefficients(self.path.tmpdir)
 
     # TODO write should only write them
@@ -304,59 +305,36 @@ class PrepAfqmc:
     def set_amplitudes(self):
         if not hasattr(self.tmp, "cc"): return
 
+        io = self.io.amplitudes
         # Read
-        if self.io.amplitudes == IO.Read():
+        if self.io.amplitudes == IO.Read:
             # path should also contain the filename
             self.tmp.amplitudes = np.load(self.path.amplitudes + "/amplitudes.npz")
         # Compute
-        elif self.io.amplitudes == IO.Write() or self.io.amplitudes == IO.NoIO():
+        elif self.io.amplitudes == IO.Write or self.io.amplitudes == IO.NoIO:
             if not hasattr(self.tmp, "amplitudes"): # Super dirty
                 self.set_ci_from_cc()
         else:
-            kaboom
+            raise TypeError(f"self.io.amplitudes is '{io}' instead of IO.Read/Write/NoIO.")
         # Write
-        if self.io.amplitudes == IO.Write():
-            self.write_pyscf_ccsd()
-            self.io.amplitudes = IO.Read()
+        if self.io.amplitudes == IO.Write:
+            self.write_amplitudes()
+            self.io.set_read_amplitudes()
 
     def set_ci_from_cc(self):
         self.tmp.amplitudes = utils.get_ci_amplitudes_from_cc(self.tmp.cc)
 
     # TODO should only write them
-    def write_pyscf_ccsd(self):
+    def write_amplitudes(self):
         if hasattr(self.tmp, "cc"): # Super dirty
             utils.write_pyscf_ccsd(self.tmp.cc, self.path.tmpdir)
 
     def prep(self):
-        #if self.tmp.write_to_disk:
-        #    self.io.fcidump = IO.Write()
-        #    self.io.amplitudes = IO.Write()
-        #    self.io.trial_coeff = IO.Write()
-
         self.set_amplitudes()
         self.set_integrals() 
         self.set_trial_coeff()
         self.set_options()
  
-        #pyscf_prep = {}
-
-        #pyscf_prep["header"] = np.array([
-        #    sum(self.mo_basis.nelec_sp),
-        #    self.mo_basis.norb,
-        #    self.mol.spin,
-        #    self.mo_basis.chol.shape[0]
-        #])
-        #pyscf_prep["hcore"] = self.mo_basis.h1.flatten()
-        #pyscf_prep["hcore_mod"] = self.mo_basis.h1_mod.flatten()
-        #pyscf_prep["chol"] = self.mo_basis.chol.flatten()
-        #pyscf_prep["energy_core"] = self.mo_basis.h0
-        ##if self.mo_basis.trial_coeff is not None:
-        #pyscf_prep["trial_coeffs"] = self.mo_basis.trial_coeff
-        #if hasattr(self.tmp, "amplitudes"): # Super dirty
-        #    pyscf_prep["amplitudes"] = self.tmp.amplitudes
-
-        #return pyscf_prep
-
 class Path:
     __slots__ = ("options", "fcidump", "tmpdir", "amplitudes")
 
@@ -365,6 +343,10 @@ class Path:
         self.fcidump = None
         self.tmpdir = None
         self.amplitudes = None
+
+    def set(self, path):
+        for attr in self.__slots__:
+            setattr(self, attr, path)
 
 class Dummy: pass
 
@@ -464,44 +446,58 @@ class IO:
     __slots__ = ("options", "fcidump", "trial_coeff", "amplitudes")
 
     def __init__(self):
-        self.options = None #self.NoIO()
-        self.fcidump = None #self.NoIO()
-        self.trial_coeff = None #self.NoIO()
-        self.amplitudes = None #self.NoIO()
+        self.options = None
+        self.fcidump = None
+        self.trial_coeff = None
+        self.amplitudes = None
+
+    def set(self, io_mode):
+        assert io_mode in (self.Read, self.Write, self.NoIO)
+        for attr in self.__slots__:
+            setattr(self, attr, io_mode)
+
+    def set_no_io(self):
+        self.set(IO.NoIO)
+
+    def set_read(self):
+        self.set(IO.Read)
+
+    def set_write(self):
+        self.set(IO.Write)
 
     class Read:
         def __eq__(self, other):
-            return isinstance(other, IO.Read)
+            return isinstance(other, self.Read)
     class Write:
         def __eq__(self, other):
-            return isinstance(other, IO.Write)
+            return isinstance(other, self.Write)
     class NoIO:
         def __eq__(self, other):
-            return isinstance(other, IO.NoIO)
+            return isinstance(other, self.NoIO)
 
-    def read_options(self):
-        self.options = self.Read()
-    def read_fcidump(self):
-        self.fcidump = self.Read()
-    def read_trial_coeff(self):
-        self.trial_coeff = self.Read()
-    def read_amplitudes(self):
-        self.amplitudes = self.Read()
+    def set_read_options(self):
+        self.options = self.Read
+    def set_read_fcidump(self):
+        self.fcidump = self.Read
+    def set_read_trial_coeff(self):
+        self.trial_coeff = self.Read
+    def set_read_amplitudes(self):
+        self.amplitudes = self.Read
 
-    def write_options(self):
-        self.options = self.Write()
-    def write_fcidump(self):
-        self.fcidump = self.Write()
-    def write_trial_coeff(self):
-        self.trial_coeff = self.Write()
-    def write_amplitudes(self):
-        self.amplitudes = self.Write()
+    def set_write_options(self):
+        self.options = self.Write
+    def set_write_fcidump(self):
+        self.fcidump = self.Write
+    def set_write_trial_coeff(self):
+        self.trial_coeff = self.Write
+    def set_write_amplitudes(self):
+        self.amplitudes = self.Write
 
-    def no_io_options(self):
-        self.options = self.NoIO()
-    def no_io_fcidump(self):
-        self.fcidump = self.NoIO()
-    def no_io_trial_coeff(self):
-        self.trial_coeff = self.NoIO()
-    def no_io_amplitudes(self):
-        self.amplitudes = self.NoIO()
+    def set_no_io_options(self):
+        self.options = self.NoIO
+    def set_no_io_fcidump(self):
+        self.fcidump = self.NoIO
+    def set_no_io_trial_coeff(self):
+        self.trial_coeff = self.NoIO
+    def set_no_io_amplitudes(self):
+        self.amplitudes = self.NoIO
