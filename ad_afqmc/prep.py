@@ -3,6 +3,14 @@ import numpy as np
 import pickle
 from ad_afqmc import utils
 
+from pyscf.cc.ccsd import CCSD
+from pyscf.cc.uccsd import UCCSD
+from pyscf.cc.gccsd import GCCSD
+from pyscf.scf.hf import RHF
+from pyscf.scf.rohf import ROHF
+from pyscf.scf.uhf import UHF
+from pyscf.scf.ghf import GHF
+
 class PrepAfqmc:
     __slots__ = (
         "mol", "ao_basis", "mo_basis", "options",
@@ -35,14 +43,14 @@ class PrepAfqmc:
         )
 
     def setup_afqmc(self):
-        self.from_pyscf_prep()
+        #self.from_pyscf_prep()
 
         self.set_options()
         self.set_integrals()
         self.set_trial_coeff()
         self.set_amplitudes()
 
-        self.tmp.pyscf_prep = self.to_pyscf_prep()
+        #self.tmp.pyscf_prep = self.to_pyscf_prep()
         self.set_ham()
         self.apply_symmetry_mask()
         self.read_observable()
@@ -79,23 +87,11 @@ class PrepAfqmc:
 
     def set_trial(self):
         self.tmp.trial, self.tmp.wave_data = utils.set_trial(
-            self.options,
-            self.options["trial"], # TODO trial
-            self.mo_basis.trial_coeff,
-            self.mo_basis.norb,
-            self.mo_basis.nelec_sp,
-            self.path.tmpdir,
-            self.tmp.pyscf_prep,
+            self
         )
         if "trial_ket" in self.options:
             self.tmp.trial_ket, self.tmp.wave_data_ket = utils.set_trial(
-                self.options,
-                self.options["trial_ket"], # TODO trial
-                self.mo_basis.trial_coeff,
-                self.mo_basis.norb,
-                self.mo_basis.nelec_sp,
-                self.path.tmpdir,
-                self.tmp.pyscf_prep,
+                self
             )
 
     def set_prop(self):
@@ -104,12 +100,40 @@ class PrepAfqmc:
     def set_sampler(self):
         self.tmp.sampler = utils.set_sampler(self.options)
 
+    def set_mol(self, mol):
+        self.tmp.mol = mol
+        self.mol.spin = mol.spin
+        self.mol.n_a, self.mol.n_b = mol.nelec
+
+    def set_pyscf_mf_cc(self, mf_or_cc, mf_or_cc_ket):
+        if isinstance(mf_or_cc, (CCSD, UCCSD, GCCSD)):
+            self.tmp.mf = mf_or_cc._scf
+            self.tmp.cc = mf_or_cc
+        elif isinstance(mf_or_cc_ket, (CCSD, UCCSD, GCCSD)):
+            self.tmp.mf = mf_or_cc_ket._scf
+            self.tmp.cc = mf_or_cc_ket
+        elif isinstance(mf_or_cc, (RHF, ROHF, UHF, GHF)):
+            self.tmp.mf = mf_or_cc
+        else:
+            raise TypeError(f"Unexpected object '{mf_or_cc}'.")
+
+    def set_basis_coeff(self, basis_coeff):
+        if basis_coeff is None:
+            if isinstance(self.tmp.mf, UHF):
+                basis_coeff = self.tmp.mf.mo_coeff[0]
+            elif isinstance(self.tmp.mf, (RHF, ROHF, GHF)):
+                basis_coeff = self.tmp.mf.mo_coeff
+            else:
+                raise TypeError(f"Unexpected object '{self.tmp.mf}'.")
+
+        self.mo_basis.basis_coeff = basis_coeff
+
     ##################
     ### pyscf_prep ###
     ##################
     def from_pyscf_prep(self):
-        if not hasattr(self.tmp, "pyscf_prep"): return
-        if self.tmp.pyscf_prep is None: return
+        assert hasattr(self.tmp, "pyscf_prep")
+        assert self.tmp.pyscf_prep is not None
 
         [nelec, norb, ms, nchol] = self.tmp.pyscf_prep["header"]
         h0 = np.array(self.tmp.pyscf_prep.get("energy_core"))
@@ -135,7 +159,7 @@ class PrepAfqmc:
         self.mo_basis.trial_coeff = mo_coeff
         self.tmp.observable = None
 
-        self.set_options()
+        #self.set_options()
 
     def to_pyscf_prep(self):
         pyscf_prep = {}
@@ -303,7 +327,11 @@ class PrepAfqmc:
     ### Amplitudes ###
     ##################
     def set_amplitudes(self):
-        if not hasattr(self.tmp, "cc"): return
+        # Super dirty
+        bra = self.options["trial"]
+        ket = self.options["trial_ket"]
+        ket = ket if ket is not None else ""
+        if not "ci" in bra and not "cc" in ket: return
 
         io = self.io.amplitudes
         # Read
@@ -313,6 +341,8 @@ class PrepAfqmc:
         # Compute
         elif self.io.amplitudes == IO.Write or self.io.amplitudes == IO.NoIO:
             if not hasattr(self.tmp, "amplitudes"): # Super dirty
+                if not hasattr(self.tmp, "cc"): # Super dirty
+                    raise AttributeError(f"self.tmp.cc must exist and point to the cc pyscf object in order to compute the amplitudes.")
                 self.set_ci_from_cc()
         else:
             raise TypeError(f"self.io.amplitudes is '{io}' instead of IO.Read/Write/NoIO.")
@@ -330,10 +360,10 @@ class PrepAfqmc:
             utils.write_pyscf_ccsd(self.tmp.cc, self.path.tmpdir)
 
     def prep(self):
-        self.set_amplitudes()
+        self.set_options()
         self.set_integrals() 
         self.set_trial_coeff()
-        self.set_options()
+        self.set_amplitudes()
  
 class Path:
     __slots__ = ("options", "fcidump", "tmpdir", "amplitudes")

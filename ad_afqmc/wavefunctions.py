@@ -3551,7 +3551,6 @@ class ccsd(wave_function):
     def get_init_walkers(
         self, wave_data: dict, n_walkers: int, walker_type: str
     ) -> walker_batch:
-
         nO, nV = self.nocc, self.nvirt
         n = nO + nV
         nex = nO * nV

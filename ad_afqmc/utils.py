@@ -1533,15 +1533,7 @@ def set_symmetry_projector(wave_data, nelec_sp, options):
 
     return wave_data
 
-def set_trial(
-    options: Dict,
-    options_trial: str,
-    mo_coeff: jnp.ndarray,
-    norb: int,
-    nelec_sp: Tuple[int, int],
-    tmp_dir: str = ".",
-    pyscf_prep: Optional[Dict] = None,
-) -> Tuple[Any, Dict]:
+def set_trial(prep) -> Tuple[Any, Dict]:
     """
     Set up the trial wavefunction.
 
@@ -1557,9 +1549,18 @@ def set_trial(
             trial: Trial wavefunction object
             wave_data: Dictionary of wavefunction data
     """
-    directory = tmp_dir
-    wave_data = {}
+    norb = prep.mo_basis.norb
+    nelec_sp = prep.mo_basis.nelec_sp
+    mo_coeff = prep.mo_basis.trial_coeff
+    options = prep.options
+    options_trial = prep.options["trial"]
+    if hasattr(prep.tmp, "trial"): # Dirty
+         options_trial = prep.options["trial_ket"]
+    if hasattr(prep.tmp, "amplitudes"):
+        amplitudes = prep.tmp.amplitudes
+    directory = prep.path.tmpdir
 
+    wave_data = {}
     wave_data = set_1rdm(wave_data, norb, nelec_sp, mo_coeff, options_trial, directory)
 
     if options.get("symmetry_projector", None) is not None:
@@ -1604,25 +1605,138 @@ def set_trial(
         )
 
     elif options_trial == "cisd":
-        try:
-            print(pyscf_prep.keys())
-            if pyscf_prep is not None and "amplitudes" in pyscf_prep:
-                amplitudes = pyscf_prep["amplitudes"]
-            else:
-                amplitudes = jnp.load(directory + "/amplitudes.npz")
-            ci1 = jnp.array(amplitudes["ci1"])
-            ci2 = jnp.array(amplitudes["ci2"])
-            trial_wave_data = {"ci1": ci1, "ci2": ci2}
-            wave_data.update(trial_wave_data)
+        ci1 = jnp.array(amplitudes["ci1"])
+        ci2 = jnp.array(amplitudes["ci2"])
+        trial_wave_data = {"ci1": ci1, "ci2": ci2}
+        wave_data.update(trial_wave_data)
 
-            if options["trial_mixed_precision"]:
-                mixed_real_dtype = jnp.float32
-                mixed_complex_dtype = jnp.complex64
-            else:
-                mixed_real_dtype = jnp.float64
-                mixed_complex_dtype = jnp.complex128
+        if options["trial_mixed_precision"]:
+            mixed_real_dtype = jnp.float32
+            mixed_complex_dtype = jnp.complex64
+        else:
+            mixed_real_dtype = jnp.float64
+            mixed_complex_dtype = jnp.complex128
 
-            trial = wavefunctions.cisd(
+        trial = wavefunctions.cisd(
+            norb,
+            nelec_sp,
+            n_chunks=options["n_chunks"],
+            projector=options["symmetry_projector"],
+            mixed_real_dtype=mixed_real_dtype,
+            mixed_complex_dtype=mixed_complex_dtype,
+            memory_mode=options["memory_mode"],
+        )
+
+    elif options_trial == "ccsd":
+        assert options["walker_type"] == "restricted"
+
+        t1 = jnp.array(amplitudes["t1"])
+        t2 = jnp.array(amplitudes["t2"])
+
+        nocc, nvirt = t1.shape
+
+        trial_wave_data = {
+            "t1": t1,
+        }
+
+        wave_data.update(trial_wave_data)
+        wave_data["mo_coeff"] = mo_coeff[0]
+
+        if options["trial_mixed_precision"]:
+            mixed_real_dtype = jnp.float32
+            mixed_complex_dtype = jnp.complex64
+        else:
+            mixed_real_dtype = jnp.float64
+            mixed_complex_dtype = jnp.complex128
+
+        trial = wavefunctions.ccsd(
+            norb,
+            nelec_sp,
+            nocc,
+            nvirt,
+            n_chunks=options["n_chunks"],
+            mixed_real_dtype=mixed_real_dtype,
+            mixed_complex_dtype=mixed_complex_dtype,
+            memory_mode=options["memory_mode"],
+        )
+        wave_data = trial.hs_op(wave_data, t2)
+
+    elif options_trial == "uccsd":
+        assert options["walker_type"] == "unrestricted"
+
+        t1a = jnp.array(amplitudes["t1a"])
+        t1b = jnp.array(amplitudes["t1b"])
+        t2aa = jnp.array(amplitudes["t2aa"])
+        t2ab = jnp.array(amplitudes["t2ab"])
+        t2bb = jnp.array(amplitudes["t2bb"])
+
+        trial_wave_data = {
+            "t1a": t1a,
+            "t1b": t1b,
+        }
+
+        nOa, nVa = amplitudes["t1a"].shape
+        nOb, nVb = amplitudes["t1b"].shape
+        nocc = (nOa, nOb)
+        nvir = (nVa, nVb)
+
+        assert nocc == nelec_sp
+        assert nvir == (norb - nOa, norb - nOb)
+
+        wave_data.update(trial_wave_data)
+        wave_data["mo_coeff"] = [mo_coeff[0], mo_coeff[1]]
+
+        if options["trial_mixed_precision"]:
+            mixed_real_dtype = jnp.float32
+            mixed_complex_dtype = jnp.complex64
+        else:
+            mixed_real_dtype = jnp.float64
+            mixed_complex_dtype = jnp.complex128
+
+        trial = wavefunctions.uccsd(
+            norb,
+            nelec_sp,
+            nocc,
+            nvir,
+            n_chunks=options["n_chunks"],
+            mixed_real_dtype=mixed_real_dtype,
+            mixed_complex_dtype=mixed_complex_dtype,
+            memory_mode=options["memory_mode"],
+        )
+
+        wave_data = trial.hs_op(
+            wave_data,
+            t2aa,
+            t2ab,
+            t2bb,
+        )
+
+    elif options_trial == "ucisd" or options_trial == "UCISD":
+
+        ci1a = jnp.array(amplitudes["ci1a"])
+        ci1b = jnp.array(amplitudes["ci1b"])
+        ci2aa = jnp.array(amplitudes["ci2aa"])
+        ci2ab = jnp.array(amplitudes["ci2ab"])
+        ci2bb = jnp.array(amplitudes["ci2bb"])
+        trial_wave_data = {
+            "ci1A": ci1a,
+            "ci1B": ci1b,
+            "ci2AA": ci2aa,
+            "ci2AB": ci2ab,
+            "ci2BB": ci2bb,
+            "mo_coeff": mo_coeff,
+        }
+        wave_data.update(trial_wave_data)
+
+        if options["trial_mixed_precision"]:
+            mixed_real_dtype = jnp.float32
+            mixed_complex_dtype = jnp.complex64
+        else:
+            mixed_real_dtype = jnp.float64
+            mixed_complex_dtype = jnp.complex128
+
+        trial = (
+            wavefunctions.ucisd(
                 norb,
                 nelec_sp,
                 n_chunks=options["n_chunks"],
@@ -1631,154 +1745,14 @@ def set_trial(
                 mixed_complex_dtype=mixed_complex_dtype,
                 memory_mode=options["memory_mode"],
             )
-        except:
-            raise ValueError("Trial specified as cisd, but amplitudes.npz not found.")
-
-    elif options_trial == "ccsd":
-        assert options["walker_type"] == "restricted"
-        try:
-            if pyscf_prep is not None and "amplitudes" in pyscf_prep:
-                amplitudes = pyscf_prep["amplitudes"]
-            else:
-                amplitudes = jnp.load(directory + "/amplitudes.npz")
-
-            t1 = jnp.array(amplitudes["t1"])
-            t2 = jnp.array(amplitudes["t2"])
-
-            nocc, nvirt = t1.shape
-
-            trial_wave_data = {
-                "t1": t1,
-            }
-
-            wave_data.update(trial_wave_data)
-            wave_data["mo_coeff"] = mo_coeff[0]
-
-            if options["trial_mixed_precision"]:
-                mixed_real_dtype = jnp.float32
-                mixed_complex_dtype = jnp.complex64
-            else:
-                mixed_real_dtype = jnp.float64
-                mixed_complex_dtype = jnp.complex128
-
-            trial = wavefunctions.ccsd(
+            if options_trial == "ucisd"
+            else wavefunctions.UCISD(
                 norb,
                 nelec_sp,
-                nocc,
-                nvirt,
                 n_chunks=options["n_chunks"],
-                mixed_real_dtype=mixed_real_dtype,
-                mixed_complex_dtype=mixed_complex_dtype,
-                memory_mode=options["memory_mode"],
+                projector=options["symmetry_projector"],
             )
-            wave_data = trial.hs_op(wave_data, t2)
-        except:
-            raise ValueError("Trial specified as ccsd, but amplitudes.npz not found.")
-    elif options_trial == "uccsd":
-        assert options["walker_type"] == "unrestricted"
-        try:
-            if pyscf_prep is not None and "amplitudes" in pyscf_prep:
-                amplitudes = pyscf_prep["amplitudes"]
-            else:
-                amplitudes = jnp.load(directory + "/amplitudes.npz")
-
-            t1a = jnp.array(amplitudes["t1a"])
-            t1b = jnp.array(amplitudes["t1b"])
-            t2aa = jnp.array(amplitudes["t2aa"])
-            t2ab = jnp.array(amplitudes["t2ab"])
-            t2bb = jnp.array(amplitudes["t2bb"])
-
-            trial_wave_data = {
-                "t1a": t1a,
-                "t1b": t1b,
-            }
-
-            nOa, nVa = amplitudes["t1a"].shape
-            nOb, nVb = amplitudes["t1b"].shape
-            nocc = (nOa, nOb)
-            nvir = (nVa, nVb)
-
-            assert nocc == nelec_sp
-            assert nvir == (norb - nOa, norb - nOb)
-
-            wave_data.update(trial_wave_data)
-            wave_data["mo_coeff"] = [mo_coeff[0], mo_coeff[1]]
-
-            if options["trial_mixed_precision"]:
-                mixed_real_dtype = jnp.float32
-                mixed_complex_dtype = jnp.complex64
-            else:
-                mixed_real_dtype = jnp.float64
-                mixed_complex_dtype = jnp.complex128
-
-            trial = wavefunctions.uccsd(
-                norb,
-                nelec_sp,
-                nocc,
-                nvir,
-                n_chunks=options["n_chunks"],
-                mixed_real_dtype=mixed_real_dtype,
-                mixed_complex_dtype=mixed_complex_dtype,
-                memory_mode=options["memory_mode"],
-            )
-
-            wave_data = trial.hs_op(
-                wave_data,
-                t2aa,
-                t2ab,
-                t2bb,
-            )
-        except:
-            raise ValueError("Trial specified as uccsd, but amplitudes.npz not found.")
-
-    elif options_trial == "ucisd" or options_trial == "UCISD":
-        try:
-            if pyscf_prep is not None and "amplitudes" in pyscf_prep:
-                amplitudes = pyscf_prep["amplitudes"]
-            else:
-                amplitudes = np.load(directory + "/amplitudes.npz")
-            ci1a = jnp.array(amplitudes["ci1a"])
-            ci1b = jnp.array(amplitudes["ci1b"])
-            ci2aa = jnp.array(amplitudes["ci2aa"])
-            ci2ab = jnp.array(amplitudes["ci2ab"])
-            ci2bb = jnp.array(amplitudes["ci2bb"])
-            trial_wave_data = {
-                "ci1A": ci1a,
-                "ci1B": ci1b,
-                "ci2AA": ci2aa,
-                "ci2AB": ci2ab,
-                "ci2BB": ci2bb,
-                "mo_coeff": mo_coeff,
-            }
-            wave_data.update(trial_wave_data)
-
-            if options["trial_mixed_precision"]:
-                mixed_real_dtype = jnp.float32
-                mixed_complex_dtype = jnp.complex64
-            else:
-                mixed_real_dtype = jnp.float64
-                mixed_complex_dtype = jnp.complex128
-
-            trial = (
-                wavefunctions.ucisd(
-                    norb,
-                    nelec_sp,
-                    n_chunks=options["n_chunks"],
-                    projector=options["symmetry_projector"],
-                    mixed_real_dtype=mixed_real_dtype,
-                    mixed_complex_dtype=mixed_complex_dtype,
-                    memory_mode=options["memory_mode"],
-                )
-                if options_trial == "ucisd"
-                else wavefunctions.UCISD(
-                    norb,
-                    nelec_sp,
-                    n_chunks=options["n_chunks"],
-                    projector=options["symmetry_projector"],
-                )
-            )
-        except:
-            raise ValueError("Trial specified as ucisd, but amplitudes.npz not found.")
+        )
 
     elif options_trial == "ghf":
         trial = wavefunctions.ghf(
@@ -1799,31 +1773,25 @@ def set_trial(
         wave_data["mo_coeff"] = mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]]
 
     elif options_trial == "gcisd_complex":
-        try:
-            amplitudes = np.load(directory + "/amplitudes.npz")
 
-            t1 = jnp.array(amplitudes["t1"])
-            t2 = jnp.array(amplitudes["t2"])
+        t1 = jnp.array(amplitudes["t1"])
+        t2 = jnp.array(amplitudes["t2"])
 
-            ci1 = t1
-            ci2 = (
-                np.einsum("ijab->iajb", t2)
-                + np.einsum("ia,jb->iajb", t1, t1)
-                - np.einsum("ib,ja->iajb", t1, t1)
-            )
-            trial_wave_data = {
-                "ci1": ci1,
-                "ci2": ci2,
-                "mo_coeff": mo_coeff,
-            }
-            wave_data.update(trial_wave_data)
-            trial = wavefunctions.gcisd_complex(
-                norb, nelec_sp, n_chunks=options["n_chunks"]
-            )
-        except:
-            raise ValueError(
-                "Trial specified as gcisd_complex, but amplitudes.npz not found."
-            )
+        ci1 = t1
+        ci2 = (
+            np.einsum("ijab->iajb", t2)
+            + np.einsum("ia,jb->iajb", t1, t1)
+            - np.einsum("ib,ja->iajb", t1, t1)
+        )
+        trial_wave_data = {
+            "ci1": ci1,
+            "ci2": ci2,
+            "mo_coeff": mo_coeff,
+        }
+        wave_data.update(trial_wave_data)
+        trial = wavefunctions.gcisd_complex(
+            norb, nelec_sp, n_chunks=options["n_chunks"]
+        )
 
     else:
         # Try to load trial from pickle file
@@ -1945,26 +1913,6 @@ def setup_afqmc(
     prep.io.set_read()
     prep.setup_afqmc()
 
-    #h0, h1, chol, norb, nelec_sp = read_fcidump(directory)
-    #options = read_options(options, directory)
-    #observable = read_observable(norb, options, directory)
-    #ham, ham_data = set_ham(norb, h0, h1, chol, options["ene0"])
-    #ham_data = apply_symmetry_mask(ham_data, options)
-    #mo_coeff = load_mo_coefficients(directory)
-    #trial, wave_data = set_trial(
-    #    options, options["trial"], mo_coeff, norb, nelec_sp, directory
-    #)
-    #prop = set_prop(options)
-    #sampler = set_sampler(options)
-
-    #print(f"# norb: {prep.mo_basis.norb}")
-    #print(f"# nelec: {(prep.mol.n_a, prep.mol.n_b)}")
-    #print("#")
-    #for op in prep.options:
-    #    if prep.options[op] is not None:
-    #        print(f"# {op}: {prep.options[op]}")
-    #print("#")
-
     return (
         prep.tmp.ham_data,
         prep.tmp.ham,
@@ -2019,47 +1967,14 @@ def setup_afqmc_ph(
     if pyscf_prep is not None and options is not None:
         prep.tmp.pyscf_prep = pyscf_prep
         prep.io.set_no_io()
+        prep.from_pyscf_prep()
         prep.setup_afqmc()
     else:
         prep.io.set_read()
         prep.setup_afqmc()
 
-    #if pyscf_prep is not None and options is not None:
-    #    [nelec, norb, ms, nchol] = pyscf_prep["header"]
-    #    h0 = jnp.array(pyscf_prep.get("energy_core"))
-    #    h1 = jnp.array(pyscf_prep.get("hcore")).reshape(norb, norb)
-    #    chol = jnp.array(pyscf_prep.get("chol")).reshape(-1, norb, norb)
-    #    assert type(ms) is np.int64
-    #    assert type(nelec) is np.int64
-    #    assert type(norb) is np.int64
-    #    ms, nelec, norb = int(ms), int(nelec), int(norb)
-    #    nelec_sp = ((nelec + abs(ms)) // 2, (nelec - abs(ms)) // 2)
-    #    mo_coeff = jnp.array(pyscf_prep["trial_coeffs"])
-    #    options = get_options(options)
-    #else:
-    #    h0, h1, chol, norb, nelec_sp = read_fcidump(directory)
-    #    mo_coeff = load_mo_coefficients(directory)
-    #    options = read_options(options, directory)
-    #observable = None  # read_observable(norb, options, directory)
-    #ham, ham_data = set_ham(norb, h0, h1, chol, options["ene0"])
-    #ham_data = apply_symmetry_mask(ham_data, options)
-
-    #trial, wave_data = set_trial(
-    #    options, options["trial"], mo_coeff, norb, nelec_sp, directory, pyscf_prep
-    #)
-    #prop = set_prop(options)
-    #sampler = set_sampler(options)
-
-    #print(f"# norb: {norb}")
-    #print(f"# nelec: {nelec_sp}")
-    #print("#")
-    #for op in options:
-    #    if options[op] is not None:
-    #        print(f"# {op}: {options[op]}")
-    #print("#")
-
     # Ensure type-narrowing for the returned options
-    assert options is not None
+    assert prep.options is not None
 
     return (
         prep.tmp.ham_data,
@@ -2103,36 +2018,8 @@ def setup_afqmc_fp(
     prep.io.set_read()
     prep.setup_afqmc()
 
-    #h0, h1, chol, norb, nelec_sp = read_fcidump(directory)
-    #options = read_options(options, directory)
-    #observable = read_observable(norb, options, directory)
-    #ham, ham_data = set_ham(norb, h0, h1, chol, options["ene0"])
-    #ham_data = apply_symmetry_mask(ham_data, options)
-    #mo_coeff = load_mo_coefficients(directory)
-    #trial, wave_data = set_trial(
-    #    options, options["trial"], mo_coeff, norb, nelec_sp, directory
-    #)
-    #trial_ket, wave_data_ket = set_trial(
-    #    options,
-    #    options.get("trial_ket", options["trial"]),
-    #    mo_coeff,
-    #    norb,
-    #    nelec_sp,
-    #    directory,
-    #)
-    #prop = set_prop(options)
-    #sampler = set_sampler(options)
-
-    #print(f"# norb: {norb}")
-    #print(f"# nelec: {nelec_sp}")
-    #print("#")
-    #for op in options:
-    #    if options[op] is not None:
-    #        print(f"# {op}: {options[op]}")
-    #print("#")
-
     # Ensure type-narrowing for the returned options
-    assert options is not None
+    assert prep.options is not None
 
     return (
         prep.tmp.ham_data,

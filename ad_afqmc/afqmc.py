@@ -420,64 +420,28 @@ class AFQMC:
         if self.ad_mode != "nuc_grad":
             from ad_afqmc.prep import PrepAfqmc
             prep = PrepAfqmc()
-            mol = self.mf_or_cc.mol
-            prep.tmp.mol = mol
-            prep.mol.spin = mol.spin
-            prep.mol.n_a, prep.mol.n_b = mol.nelec
-            # Super dirty and bad
-            if isinstance(self.mf_or_cc, (CCSD, UCCSD)):
-                prep.tmp.cc = self.mf_or_cc
-                prep.tmp.mf = self.mf_or_cc._scf
-            elif isinstance(self.mf_or_cc_ket, (CCSD, UCCSD)):
-                prep.tmp.cc = self.mf_or_cc_ket
-                prep.tmp.mf = self.mf_or_cc_ket._scf
-            else:
-                prep.tmp.mf = self.mf_or_cc
-            prep.mo_basis.norb_frozen = self.norb_frozen
-            # Super dirty
-            if self.basis_coeff == None:
-                if isinstance(self.mf_or_cc, (scf.uhf.UHF, UCCSD)):
-                    prep.mo_basis.basis_coeff = self.mf_or_cc.mo_coeff[0]
-                else:
-                    prep.mo_basis.basis_coeff = self.mf_or_cc.mo_coeff
-            else:
-                prep.mo_basis.basis_coeff = self.basis_coeff
+            prep.set_mol(self.mf_or_cc.mol)
+            prep.set_pyscf_mf_cc(self.mf_or_cc, self.mf_or_cc_ket)
+            prep.set_basis_coeff(self.basis_coeff)
             prep.mo_basis.norb_frozen = self.norb_frozen
             prep.mo_basis.chol_cut = self.chol_cut
-            prep.path.options = self.tmpdir
-            prep.path.tmpdir = self.tmpdir
-            prep.path.fcidump = self.tmpdir
-            prep.path.amplitudes = self.tmpdir
+            prep.path.set(self.tmpdir)
             prep.options = options
-            prep.tmp.pyscf_prep = None
-            # Dirty
-            if self.free_projection:
-                prep.tmp.write_to_disk = True
-            else:
-                prep.tmp.write_to_disk = self.write_to_disk
-            if self.write_to_disk:
-                prep.io.set_write()
-            else:
+            #prep.tmp.pyscf_prep = None
+            ## Dirty
+            #if self.free_projection:
+            #    prep.tmp.write_to_disk = True
+            #else:
+            #    prep.tmp.write_to_disk = self.write_to_disk
+            #if self.write_to_disk:
+            #    prep.io.set_write()
+            #else:
+            if not dry_run:
                 prep.io.set_no_io()
+            else:
+                prep.io.set_write()
 
             prep.prep()
-            #pyscf_prep = prep.prep()
-
-            #print(pyscf_prep["header"]) 
-            #print(pyscf_prep["hcore"].shape) 
-            #print(pyscf_prep["amplitudes"]["ci1"].shape)
-            #pyscf_prep = utils.prep_afqmc(
-            #    self.mf_or_cc,
-            #    basis_coeff=self.basis_coeff,
-            #    norb_frozen=self.norb_frozen,
-            #    chol_cut=self.chol_cut,
-            #    integrals=self.integrals,
-            #    tmpdir=self.tmpdir,
-            #    write_to_disk=self.write_to_disk,
-            #)
-            #print(pyscf_prep["header"]) 
-            #print(pyscf_prep["hcore"].shape) 
-            #print(pyscf_prep["amplitudes"]["ci1"].shape)
         else:
             raise NotImplementedError(
                 "Nuclear gradients with AFQMC are not implemented yet."
@@ -491,26 +455,6 @@ class AFQMC:
                 pickle.dump(options, f)
             return self.tmpdir
         elif options["free_projection"]:
-            ## run_afqmc.optimize_trial(options)
-            #if (self.mf_or_cc_ket != self.mf_or_cc) and (
-            #    isinstance(self.mf_or_cc_ket, UCCSD)
-            #    or isinstance(self.mf_or_cc_ket, CCSD)
-            #):
-            #    utils.write_pyscf_ccsd(self.mf_or_cc_ket, options["tmpdir"])
-            ## options=None, script=None, mpi_prefix=None, nproc=None
-            #return run_afqmc_fp(
-            #    options=options,
-            #    mpi_prefix=self.mpi_prefix,
-            #    nproc=self.nproc,
-            #    tmpdir=self.tmpdir,
-            #)
             return run_afqmc_fp(prep)
         else:
             return run_afqmc_ph(prep)
-            #return run_afqmc_ph(
-            #    pyscf_prep=pyscf_prep,
-            #    options=options,
-            #    mpi_prefix=self.mpi_prefix,
-            #    nproc=self.nproc,
-            #    tmpdir=self.tmpdir,
-            #)

@@ -26,8 +26,6 @@ def check_1(mf, mycc):
     with open(af.tmpdir + "/options.bin", "rb") as f:
         options = pickle.load(f)
 
-    utils.write_pyscf_ccsd(mycc, af.tmpdir)
-
     (
         ham_data,
         ham,
