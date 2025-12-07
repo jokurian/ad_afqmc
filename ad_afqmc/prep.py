@@ -483,55 +483,6 @@ class Options:
         for key, val in options.items():
             setattr(self, key, val)
 
-class Trial:
-    def __init__(self):
-        self.bra = None
-        self.ket = None
-        self.walker = None
-
-    class Bra:
-        class RHF: pass
-        class UHF: pass
-        class GHF: pass
-        class GHFComplex: pass
-        class NOCI: pass
-        class CISD: pass
-        class UCISD: pass
-        class GCISD: pass
-        class PKL: pass
-    
-    class Ket:
-        class RHF: pass
-        class UHF: pass
-        class GHF: pass
-        class CCSD: pass
-        class UCCSD: pass
-    
-    class Walker:
-        class Restricted: pass
-        class Unrestricted: pass
-        class Generalized: pass
-
-class CI:
-    def __init__(self):
-        self.type = None
-        c1 = None
-        c2 = None
-
-    class Restricted: pass
-    class Unrestricted: pass
-    class Generalized: pass
-
-class CC:
-    def __init__(self):
-        self.type = None
-        t1 = None
-        t2 = None
-
-    class Restricted: pass
-    class Unrestricted: pass
-    class Generalized: pass
-
 class IO:
     __slots__ = ("options", "fcidump", "trial_coeff", "amplitudes")
 
