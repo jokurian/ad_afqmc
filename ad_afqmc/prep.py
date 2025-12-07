@@ -25,7 +25,7 @@ class PrepAfqmc:
         self.cc = None
         self.trial = None
         self.path = Path()
-        self.tmp = Dummy()
+        self.tmp = Tmp()
         self.io = IO()
 
     def get_setup_data(self):
@@ -43,14 +43,11 @@ class PrepAfqmc:
         )
 
     def setup_afqmc(self):
-        #self.from_pyscf_prep()
-
         self.set_options()
         self.set_integrals()
         self.set_trial_coeff()
         self.set_amplitudes()
 
-        #self.tmp.pyscf_prep = self.to_pyscf_prep()
         self.set_ham()
         self.apply_symmetry_mask()
         self.read_observable()
@@ -364,7 +361,7 @@ class PrepAfqmc:
         self.set_integrals() 
         self.set_trial_coeff()
         self.set_amplitudes()
- 
+
 class Path:
     __slots__ = ("options", "fcidump", "tmpdir", "amplitudes")
 
@@ -378,7 +375,7 @@ class Path:
         for attr in self.__slots__:
             setattr(self, attr, path)
 
-class Dummy: pass
+class Tmp: pass
 
 class Mol:
     __slots__ = ("n_a", "n_b", "spin", "ene0")
@@ -422,6 +419,69 @@ class MoBasis:
         class Restricted: pass
         class Unrestricted: pass
         class Generalized: pass
+
+# Options should be divided, it does not make any sense to have AD, LNO, nuclear
+# gradient, symmetry, ... keywords here as their number is becoming large.
+# I don't think mode should be here.
+class Options:
+    # To catch typos...
+    __slots__ = ("dt", "n_prop_steps", "n_ene_blocks",
+    "n_walkers", "n_sr_blocks", "n_blocks", "n_ene_blocks_eql",
+    "n_sr_blocks_eql", "n_eql", "seed", "ad_mode", "orbital_rotation",
+    "do_sr", "walker_type", "symmetry_projector", "ngrid", "optimize_trial",
+    "target_spin", "symmetry", "save_walkers", "dR", "free_projection",
+    "ene0", "n_chunks", "vhs_mixed_precision", "trial_mixed_precision",
+    "memory_mode", "write_to_disk", "prjlo",
+    )
+
+    def __init__(self, mode):
+        self.dt = 0.005
+        self.n_prop_steps = 50
+        self.n_ene_blocks = 1
+        if mode == "small":
+            self.n_walkers = 50
+            self.n_sr_blocks = 1
+            self.n_blocks = 200
+            self.n_ene_blocks_eql = 1
+            self.n_sr_blocks_eql = 5
+            self.n_eql = 10
+        elif mode == "production":
+            self.n_walkers = 200
+            self.n_sr_blocks = 20
+            self.n_blocks = 500
+            self.n_ene_blocks_eql = 5
+            self.n_sr_blocks_eql = 10
+            self.n_eql = 3
+        self.seed = np.random.randint(1, int(1e6))
+        self.ad_mode = None
+        self.orbital_rotation = True
+        self.do_sr = True
+        self.walker_type = "restricted"
+
+        # this can be tr, s2 or sz for time-reversal, S^2, or S_z symmetry projection, respectively
+        self.symmetry_projector = None
+        self.ngrid = 4 # Number of grid point for the quadrature
+        self.optimize_trial = False
+        self.target_spin = 0  # 2S and is only used when symmetry_projector is s2
+        self.symmetry = False
+        self.save_walkers = False
+        self.dR = 1e-5  # displacement used in finite difference to calculate integral gradients for ad_mode = nuc_grad
+        self.free_projection = False
+
+        self.ene0 = 0.0
+        self.n_chunks = 1
+        self.vhs_mixed_precision = False
+        self.trial_mixed_precision = False
+        self.memory_mode = "low"
+        self.write_to_disk = False # Write FCIDUMP and ci/cc coeff to disk
+        self.prjlo = None  # used in LNO, need to fix
+
+    def to_dict(self):
+        return {slot: getattr(self, slot) for slot in self.__slots__}
+
+    def from_dict(self, options: dict):
+        for key, val in options.items():
+            setattr(self, key, val)
 
 class Trial:
     def __init__(self):

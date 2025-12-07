@@ -13,6 +13,8 @@ from pyscf.cc.uccsd import UCCSD
 
 from ad_afqmc import config, driver, grad_utils, optimize_trial, utils, wavefunctions
 
+from ad_afqmc.prep import PrepAfqmc, Options
+
 print = partial(print, flush=True)
 
 
@@ -111,13 +113,6 @@ def run_afqmc(
 
 
 def run_afqmc_ph(prep):
-#def run_afqmc_ph(
-#    pyscf_prep: Optional[dict] = None,
-#    options: Optional[dict] = None,
-#    mpi_prefix: Optional[str] = None,
-#    nproc: Optional[int] = None,
-#    tmpdir: Optional[str] = None,
-#):
     """
     Run AFQMC calculation from pre-generated input files.
 
@@ -133,16 +128,6 @@ def run_afqmc_ph(prep):
     """
     config.setup_jax()
     comm = config.setup_comm()
-    #(
-    #    ham_data,
-    #    ham,
-    #    prop,
-    #    trial,
-    #    wave_data,
-    #    sampler,
-    #    observable,
-    #    options,
-    #) = utils.setup_afqmc_ph(pyscf_prep, options)
 
     prep.setup_afqmc()
     (
@@ -172,22 +157,9 @@ def run_afqmc_ph(prep):
     return e_afqmc, err_afqmc
 
 
-#def run_afqmc_fp(options=None, script=None, mpi_prefix=None, nproc=None, tmpdir=None):
 def run_afqmc_fp(prep):
     config.setup_jax()
     comm = config.setup_comm()
-    #(
-    #    ham_data,
-    #    ham,
-    #    prop,
-    #    trial,
-    #    wave_data,
-    #    trial_ket,
-    #    wave_data_ket,
-    #    sampler,
-    #    observable,
-    #    options,
-    #) = utils.setup_afqmc_fp(options, options["tmpdir"])
 
     prep.setup_afqmc()
     (
@@ -320,38 +292,17 @@ class AFQMC:
         self.integrals = None  # custom integrals
         self.mpi_prefix = None
         self.nproc = 1
-        self.dt = 0.005
-        self.n_prop_steps = 50
-        self.n_ene_blocks = 1
-        if mode == "small":
-            self.n_walkers = 50
-            self.n_sr_blocks = 1
-            self.n_blocks = 200
-            self.n_ene_blocks_eql = 1
-            self.n_sr_blocks_eql = 5
-            self.n_eql = 10
-        elif mode == "production":
-            self.n_walkers = 200
-            self.n_sr_blocks = 20
-            self.n_blocks = 500
-            self.n_ene_blocks_eql = 5
-            self.n_sr_blocks_eql = 10
-            self.n_eql = 3
-        self.seed = np.random.randint(1, int(1e6))
-        self.ad_mode = None
-        self.orbital_rotation = True
-        self.do_sr = True
-        self.walker_type = "restricted"
 
-        # this can be tr, s2 or sz for time-reversal, S^2, or S_z symmetry projection, respectively
-        self.symmetry_projector = None
-        self.ngrid = 4 # Number of grid point for the quadrature
-        self.optimize_trial = False
-        self.target_spin = 0  # 2S and is only used when symmetry_projector is s2
-        self.symmetry = False
-        self.save_walkers = False
-        self.dR = 1e-5  # displacement used in finite difference to calculate integral gradients for ad_mode = nuc_grad
-        self.free_projection = False
+        self.set_trial_bra_label(mf_or_cc)
+        self.set_trial_ket_label(mf_or_cc_ket)
+
+        self.tmpdir = __config__.TMPDIR + f"/afqmc{np.random.randint(1, int(1e6))}/"
+
+        # Set default options
+        for attr, val in Options(mode).to_dict().items():
+            setattr(self, attr, val)
+
+    def set_trial_bra_label(self, mf_or_cc):
         self.trial = None
         if isinstance(mf_or_cc, scf.uhf.UHF) or isinstance(mf_or_cc, scf.rohf.ROHF):
             self.trial = "uhf"
@@ -362,6 +313,7 @@ class AFQMC:
         elif isinstance(mf_or_cc, CCSD):
             self.trial = "cisd"
 
+    def set_trial_ket_label(self, mf_or_cc_ket):
         if isinstance(mf_or_cc_ket, scf.uhf.UHF) or isinstance(
             mf_or_cc_ket, scf.rohf.ROHF
         ):
@@ -374,15 +326,6 @@ class AFQMC:
             self.trial_ket = "ccsd"
         else:
             self.trial_ket = self.trial
-
-        self.ene0 = 0.0
-        self.n_chunks = 1
-        self.vhs_mixed_precision = False
-        self.trial_mixed_precision = False
-        self.memory_mode = "low"
-        self.tmpdir = __config__.TMPDIR + f"/afqmc{np.random.randint(1, int(1e6))}/"
-        self.write_to_disk = False # Write FCIDUMP and ci/cc coeff to disk
-        self.prjlo = None  # used in LNO, need to fix
 
     def make_options_dict(self):
         options = {}
@@ -418,7 +361,6 @@ class AFQMC:
         options = self.make_options_dict()
 
         if self.ad_mode != "nuc_grad":
-            from ad_afqmc.prep import PrepAfqmc
             prep = PrepAfqmc()
             prep.set_mol(self.mf_or_cc.mol)
             prep.set_pyscf_mf_cc(self.mf_or_cc, self.mf_or_cc_ket)
@@ -427,19 +369,11 @@ class AFQMC:
             prep.mo_basis.chol_cut = self.chol_cut
             prep.path.set(self.tmpdir)
             prep.options = options
-            #prep.tmp.pyscf_prep = None
-            ## Dirty
-            #if self.free_projection:
-            #    prep.tmp.write_to_disk = True
-            #else:
-            #    prep.tmp.write_to_disk = self.write_to_disk
-            #if self.write_to_disk:
-            #    prep.io.set_write()
-            #else:
-            if not dry_run:
-                prep.io.set_no_io()
-            else:
+
+            if dry_run:
                 prep.io.set_write()
+            else:
+                prep.io.set_no_io()
 
             prep.prep()
         else:
