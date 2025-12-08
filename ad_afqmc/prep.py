@@ -189,6 +189,8 @@ class PrepAfqmc:
         io = self.io.options
 
         # Check
+        IOMode.check(io)
+
         if io.is_read():
             self.path.check(self.path.options + "/options.bin")
 
@@ -200,7 +202,7 @@ class PrepAfqmc:
             self.options = utils.get_options(self.options)
             self.mol.ene0 = self.options["ene0"]
         else:
-            raise TypeError(f"self.io.options is '{io}' instead of IO.Read/Write/NoIO.")
+            raise ValueError(f"io should be IOMode.Read/Write/NoIO, not {io}.")
 
         # Write
         if io.is_write():
@@ -224,6 +226,8 @@ class PrepAfqmc:
         io = self.io.fcidump
 
         # Check
+        IOMode.check(io)
+
         if io.is_read():
             self.path.check(self.path.fcidump + "/FCIDUMP_chol")
 
@@ -235,7 +239,7 @@ class PrepAfqmc:
             if self.mo_basis.chol is None:
                 self.compute_integrals()
         else:
-            raise TypeError(f"self.io.fcidump is '{io}' instead of IO.Read/Write/NoIO.")
+            raise ValueError(f"io should be IOMode.Read/Write/NoIO, not {io}.")
 
         # Write
         if io.is_write():
@@ -303,6 +307,8 @@ class PrepAfqmc:
         io = self.io.trial_coeff
 
         # Check
+        IOMode.check(io)
+
         if io.is_read():
             self.path.check(self.path.trial_coeff + "/mo_coeff.npz")
 
@@ -321,7 +327,7 @@ class PrepAfqmc:
                     self.mo_basis.norb_frozen,
                 )
         else:
-            raise TypeError(f"self.io.trial_coeff is '{io}' instead of IO.Read/Write/NoIO.")
+            raise ValueError(f"io should be IOMode.Read/Write/NoIO, not {io}.")
 
         # Write
         if io.is_write():
@@ -346,15 +352,18 @@ class PrepAfqmc:
     ### Amplitudes ###
     ##################
     def set_amplitudes(self):
-        # Super dirty
         bra = self.options["trial"]
         ket = self.options["trial_ket"]
-        ket = ket if ket is not None else ""
-        if not "ci" in bra and not "cc" in ket: return
+
+        trial = ["cisd", "ucisd", "gcisd", "gcisd_complex", "ccsd", "uccsd"]
+        if not bra in trial and not ket in trial:
+            return
 
         io = self.io.amplitudes
 
         # Check
+        IOMode.check(io)
+
         if io.is_read():
             self.path.check(self.path.amplitudes + "/amplitudes.npz")
 
@@ -369,7 +378,7 @@ class PrepAfqmc:
                     raise AttributeError(f"self.tmp.cc must exist and point to the cc pyscf object in order to compute the amplitudes.")
                 self.set_ci_from_cc()
         else:
-            raise TypeError(f"self.io.amplitudes is '{io}' instead of IO.Read/Write/NoIO.")
+            raise ValueError(f"io should be IOMode.Read/Write/NoIO, not {io}.")
 
         # Write
         if io.is_write():
@@ -381,8 +390,7 @@ class PrepAfqmc:
 
     # TODO should only write them
     def write_amplitudes(self):
-        if hasattr(self.tmp, "cc"): # Super dirty
-            utils.write_pyscf_ccsd(self.tmp.cc, self.path.tmpdir)
+        utils.write_pyscf_ccsd(self.tmp.cc, self.path.amplitudes)
 
     # Read/Compute/Write what is needed for the calculation
     def prep(self):
@@ -408,7 +416,8 @@ class Path:
 
     # Check if the path exists
     def check(self, path):
-        assert os.path.isfile(path), f"File '{path}' does not exist."
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"File '{path}' does not exist.")
 
 class Tmp: pass
 
@@ -532,6 +541,10 @@ class IOMode(Enum):
     def is_no_io(self):
         return self is self.NoIO
 
+    def check(io_mode):
+        if not isinstance(io_mode, IOMode):
+            raise TypeError(f"Type '{io}' instead of IOMode.Read/Write/NoIO.")
+
 class IO:
     __slots__ = ("options", "fcidump", "trial_coeff", "amplitudes")
 
@@ -560,7 +573,7 @@ class IO:
 def _make_setter(field, io_mode):
     def setter(self):
         setattr(self, field, io_mode)
-    setter.__name__ = f"set_{io_mode.name.lower()}_{field}"
+    #setter.__name__ = f"set_{io_mode.name.lower()}_{field}"
     return setter
 
 for field in IO.__slots__:
