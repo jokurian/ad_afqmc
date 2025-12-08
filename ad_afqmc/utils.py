@@ -1911,6 +1911,8 @@ def setup_afqmc(
     prep.options = options
     prep.path.set(directory)
     prep.io.set_read()
+    if options is not None:
+        prep.io.set_noio_options()
     prep.setup_afqmc()
 
     return (

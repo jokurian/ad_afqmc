@@ -1,4 +1,5 @@
 import os
+from enum import Enum, auto
 import numpy as np
 import pickle
 from ad_afqmc import utils
@@ -28,6 +29,7 @@ class PrepAfqmc:
         self.tmp = Tmp()
         self.io = IO()
 
+    # Returns data needed for the afqmc calculation
     def get_setup_data(self):
         return (
             self.tmp.ham_data,
@@ -42,6 +44,7 @@ class PrepAfqmc:
             self.options,
         )
 
+    # Prepares the data for the afqmc calculation
     def setup_afqmc(self):
         self.set_options()
         self.set_integrals()
@@ -152,6 +155,7 @@ class PrepAfqmc:
         self.mo_basis.h1 = h1
         self.mo_basis.h1_mod = h1_mod
         self.mo_basis.chol = chol
+        self.ao_basis.n_chol = chol.shape[0]
         self.mo_basis.nelec_sp = nelec_sp
         self.mo_basis.trial_coeff = mo_coeff
         self.tmp.observable = None
@@ -183,18 +187,23 @@ class PrepAfqmc:
     ###############
     def set_options(self):
         io = self.io.options
+
+        # Check
+        if io.is_read():
+            self.path.check(self.path.options + "/options.bin")
+
         # Read
-        if io == IO.Read:
+        if io.is_read():
             self.read_options()
         # Compute
-        elif io == IO.Write or io == IO.NoIO:
+        elif io.is_write() or io.is_no_io():
             self.options = utils.get_options(self.options)
             self.mol.ene0 = self.options["ene0"]
         else:
             raise TypeError(f"self.io.options is '{io}' instead of IO.Read/Write/NoIO.")
 
         # Write
-        if io == IO.Write:
+        if io.is_write():
             self.write_options()
             self.io.set_read_options()
 
@@ -213,18 +222,23 @@ class PrepAfqmc:
     # TODO add asserts
     def set_integrals(self):
         io = self.io.fcidump
+
+        # Check
+        if io.is_read():
+            self.path.check(self.path.fcidump + "/FCIDUMP_chol")
+
         # Read
-        if io == IO.Read:
+        if io.is_read():
             self.read_fcidump()
         # Compute
-        elif io == IO.Write or io == IO.NoIO:
+        elif io.is_write() or io.is_no_io():
             if self.mo_basis.chol is None:
                 self.compute_integrals()
         else:
             raise TypeError(f"self.io.fcidump is '{io}' instead of IO.Read/Write/NoIO.")
 
         # Write
-        if self.io.fcidump == IO.Write:
+        if io.is_write():
             self.write_fcidump()
             self.io.set_read_fcidump()
 
@@ -237,25 +251,27 @@ class PrepAfqmc:
             self.mo_basis.basis_coeff,
             self.ao_basis.custom_integrals,
             self.mo_basis.norb_frozen,
-            self.mo_basis.chol_cut,
+            self.ao_basis.chol_cut,
         )
         print("# Finished calculating Cholesky integrals\n#")
         
-        nbasis = h1e.shape[-1]
+        norb = h1e.shape[-1]
+        n_chol = chol.shape[0]
         print("# Size of the correlation space:")
         print(f"# Number of electrons: {nelec}")
-        print(f"# Number of basis functions: {nbasis}")
-        print(f"# Number of Cholesky vectors: {chol.shape[0]}\n#")
-        chol = chol.reshape((-1, nbasis, nbasis))
+        print(f"# Number of orbitals: {norb}")
+        print(f"# Number of Cholesky vectors: {n_chol}\n#")
+        chol = chol.reshape((-1, norb, norb))
         v0 = 0.5 * np.einsum("nik,njk->ij", chol, chol, optimize="optimal")
         h1e_mod = h1e - v0
-        chol = chol.reshape((chol.shape[0], -1))
-        self.mo_basis.norb = nbasis
+        chol = chol.reshape((n_chol, norb * norb))
+        self.mo_basis.norb = norb
         self.mo_basis.nelec_sp = nelec
         self.mo_basis.h0 = enuc
         self.mo_basis.h1 = h1e
         self.mo_basis.h1_mod = h1e_mod
         self.mo_basis.chol = chol
+        self.ao_basis.n_chol = n_chol
 
     def read_fcidump(self):
         h0, h1, h1_mod, chol, norb, nelec_sp = utils.read_fcidump(self.path.fcidump)
@@ -285,11 +301,17 @@ class PrepAfqmc:
     # TODO add asserts
     def set_trial_coeff(self):
         io = self.io.trial_coeff
+
+        # Check
+        if io.is_read():
+            self.path.check(self.path.trial_coeff + "/mo_coeff.npz")
+
         # Read
-        if io == IO.Read:
+        if io.is_read():
             self.read_trial_coeff()
+
         # Compute
-        elif io == IO.Write or io == IO.NoIO:
+        elif io.is_write() or io.is_no_io():
             if self.mo_basis.trial_coeff is None:
                 self.mo_basis.trial_coeff = utils.get_trial_coeffs(
                     self.tmp.mol, # TODO Remove, only needed for the overlap
@@ -302,12 +324,12 @@ class PrepAfqmc:
             raise TypeError(f"self.io.trial_coeff is '{io}' instead of IO.Read/Write/NoIO.")
 
         # Write
-        if self.io.trial_coeff == IO.Write:
+        if io.is_write():
             self.write_trial_coeff()
             self.io.set_read_trial_coeff()
 
     def read_trial_coeff(self):
-        self.mo_basis.trial_coeff = utils.load_mo_coefficients(self.path.tmpdir)
+        self.mo_basis.trial_coeff = utils.load_mo_coefficients(self.path.trial_coeff)
 
     # TODO write should only write them
     def write_trial_coeff(self):
@@ -317,7 +339,7 @@ class PrepAfqmc:
             self.mo_basis.basis_coeff,
             self.mo_basis.norb,
             self.mo_basis.norb_frozen,
-            self.path.tmpdir,
+            self.path.trial_coeff,
         )
 
     ##################
@@ -331,20 +353,26 @@ class PrepAfqmc:
         if not "ci" in bra and not "cc" in ket: return
 
         io = self.io.amplitudes
+
+        # Check
+        if io.is_read():
+            self.path.check(self.path.amplitudes + "/amplitudes.npz")
+
         # Read
-        if self.io.amplitudes == IO.Read:
+        if io.is_read():
             # path should also contain the filename
             self.tmp.amplitudes = np.load(self.path.amplitudes + "/amplitudes.npz")
         # Compute
-        elif self.io.amplitudes == IO.Write or self.io.amplitudes == IO.NoIO:
+        elif io.is_write() or io.is_no_io():
             if not hasattr(self.tmp, "amplitudes"): # Super dirty
                 if not hasattr(self.tmp, "cc"): # Super dirty
                     raise AttributeError(f"self.tmp.cc must exist and point to the cc pyscf object in order to compute the amplitudes.")
                 self.set_ci_from_cc()
         else:
             raise TypeError(f"self.io.amplitudes is '{io}' instead of IO.Read/Write/NoIO.")
+
         # Write
-        if self.io.amplitudes == IO.Write:
+        if io.is_write():
             self.write_amplitudes()
             self.io.set_read_amplitudes()
 
@@ -356,6 +384,7 @@ class PrepAfqmc:
         if hasattr(self.tmp, "cc"): # Super dirty
             utils.write_pyscf_ccsd(self.tmp.cc, self.path.tmpdir)
 
+    # Read/Compute/Write what is needed for the calculation
     def prep(self):
         self.set_options()
         self.set_integrals() 
@@ -363,17 +392,23 @@ class PrepAfqmc:
         self.set_amplitudes()
 
 class Path:
-    __slots__ = ("options", "fcidump", "tmpdir", "amplitudes")
+    __slots__ = ("tmpdir", "options", "fcidump", "trial_coeff", "amplitudes")
 
     def __init__(self):
+        self.tmpdir = None
         self.options = None
         self.fcidump = None
-        self.tmpdir = None
+        self.trial_coeff = None
         self.amplitudes = None
 
+    # Brute-force
     def set(self, path):
         for attr in self.__slots__:
             setattr(self, attr, path)
+
+    # Check if the path exists
+    def check(self, path):
+        assert os.path.isfile(path), f"File '{path}' does not exist."
 
 class Tmp: pass
 
@@ -387,18 +422,20 @@ class Mol:
         self.ene0 = None
 
 class AoBasis:
-    __slots__ = ("n_ao", "overlap", "custom_integrals")
+    __slots__ = ("n_ao", "n_chol", "chol_cut", "overlap", "custom_integrals")
 
     def __init__(self):
         self.n_ao = None
+        self.n_chol = None
+        self.chol_cut = None
         self.overlap = None
         self.custom_integrals = None
 
 class MoBasis:
     __slots__ = (
         "mo_type", "norb", "nelec_sp", "norb_frozen",
-        "mo_coeff", "basis_coeff", "trial_coeff", "n_chol", "chol",
-        "chol_cut", "h0", "h1", "h1_mod",
+        "mo_coeff", "basis_coeff", "trial_coeff","chol",
+        "h0", "h1", "h1_mod",
     )
     def __init__(self):
         self.mo_type = None
@@ -408,9 +445,7 @@ class MoBasis:
         self.mo_coeff = None
         self.basis_coeff = None
         self.trial_coeff = None
-        self.n_chol = None
         self.chol = None
-        self.chol_cut = None
         self.h0 = None
         self.h1 = None
         self.h1_mod = None
@@ -483,6 +518,20 @@ class Options:
         for key, val in options.items():
             setattr(self, key, val)
 
+class IOMode(Enum):
+    Read = auto()
+    Write = auto()
+    NoIO = auto()
+
+    def is_read(self):
+        return self is self.Read
+
+    def is_write(self):
+        return self is self.Write
+
+    def is_no_io(self):
+        return self is self.NoIO
+
 class IO:
     __slots__ = ("options", "fcidump", "trial_coeff", "amplitudes")
 
@@ -493,52 +542,28 @@ class IO:
         self.amplitudes = None
 
     def set(self, io_mode):
-        assert io_mode in (self.Read, self.Write, self.NoIO)
+        assert io_mode in IOMode
         for attr in self.__slots__:
             setattr(self, attr, io_mode)
 
     def set_no_io(self):
-        self.set(IO.NoIO)
+        self.set(IOMode.NoIO)
 
     def set_read(self):
-        self.set(IO.Read)
+        self.set(IOMode.Read)
 
     def set_write(self):
-        self.set(IO.Write)
+        self.set(IOMode.Write)
 
-    class Read:
-        def __eq__(self, other):
-            return isinstance(other, self.Read)
-    class Write:
-        def __eq__(self, other):
-            return isinstance(other, self.Write)
-    class NoIO:
-        def __eq__(self, other):
-            return isinstance(other, self.NoIO)
+# Creates the method set_read/write/noio_ for all the IO fields, i.e.,
+# set_read_options, set_read_fcidump, ...
+def _make_setter(field, io_mode):
+    def setter(self):
+        setattr(self, field, io_mode)
+    setter.__name__ = f"set_{io_mode.name.lower()}_{field}"
+    return setter
 
-    def set_read_options(self):
-        self.options = self.Read
-    def set_read_fcidump(self):
-        self.fcidump = self.Read
-    def set_read_trial_coeff(self):
-        self.trial_coeff = self.Read
-    def set_read_amplitudes(self):
-        self.amplitudes = self.Read
-
-    def set_write_options(self):
-        self.options = self.Write
-    def set_write_fcidump(self):
-        self.fcidump = self.Write
-    def set_write_trial_coeff(self):
-        self.trial_coeff = self.Write
-    def set_write_amplitudes(self):
-        self.amplitudes = self.Write
-
-    def set_no_io_options(self):
-        self.options = self.NoIO
-    def set_no_io_fcidump(self):
-        self.fcidump = self.NoIO
-    def set_no_io_trial_coeff(self):
-        self.trial_coeff = self.NoIO
-    def set_no_io_amplitudes(self):
-        self.amplitudes = self.NoIO
+for field in IO.__slots__:
+    for io_mode in IOMode:
+        fname = f"set_{io_mode.name.lower()}_{field}"
+        setattr(IO, fname, _make_setter(field, io_mode))
