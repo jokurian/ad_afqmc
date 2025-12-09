@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 import os
 from pyscf import scf, gto, cc
-from ad_afqmc import pyscf_interface, run_afqmc
+from ad_afqmc import pyscf_interface, afqmc
 
 tmpdir = "tmp"
 if not os.path.exists(tmpdir):

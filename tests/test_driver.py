@@ -7,7 +7,7 @@ from ad_afqmc import config
 config.setup_jax()
 import pytest
 
-from ad_afqmc import run_afqmc
+from ad_afqmc import afqmc
 
 seed = 98
 
@@ -27,7 +27,7 @@ def test_energy_mpi():
         "trial": "uhf",
         "walker_type": "unrestricted",
     }
-    ene, _ = run_afqmc.run_afqmc(
+    ene, _ = afqmc.run_afqmc(
         options=options, mpi_prefix="mpirun ", nproc=2, tmpdir=tmpdir
     )
     assert np.isclose(ene, -3.239302058353345, atol=1e-5)
@@ -45,7 +45,7 @@ def test_jvp_h1e():
         "walker_type": "unrestricted",
         "ad_mode": "forward",
     }
-    ene, _ = run_afqmc.run_afqmc(options=options, nproc=2, tmpdir=tmpdir)
+    ene, _ = afqmc.run_afqmc(options=options, nproc=2, tmpdir=tmpdir)
     assert np.isclose(ene, -3.2359788941631957, atol=1e-5)
     obs_err = np.loadtxt(f"{tmpdir}/obs_err.txt")
     assert np.isclose(obs_err[0], -11.9139997, atol=1e-5)
@@ -63,7 +63,7 @@ def test_vjp_rdm():
         "walker_type": "unrestricted",
         "ad_mode": "reverse",
     }
-    ene, _ = run_afqmc.run_afqmc(options=options, nproc=2, tmpdir=tmpdir)
+    ene, _ = afqmc.run_afqmc(options=options, nproc=2, tmpdir=tmpdir)
     assert np.isclose(ene, -3.2359788941631957, atol=1e-5)
     rdm1 = np.load("rdm1_afqmc.npz")["rdm1"]
     assert np.isclose(np.trace(rdm1[0]), 3)
@@ -82,7 +82,7 @@ def test_energy():
         "trial": "uhf",
         "walker_type": "unrestricted",
     }
-    ene, _ = run_afqmc.run_afqmc(options=options, tmpdir=tmpdir)
+    ene, _ = afqmc.run_afqmc(options=options, tmpdir=tmpdir)
     assert np.isclose(ene, -3.238196747261496, atol=1e-5)
 
 

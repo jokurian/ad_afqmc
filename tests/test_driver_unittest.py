@@ -4,7 +4,7 @@ import unittest
 
 from ad_afqmc import config
 config.setup_jax()
-from ad_afqmc import run_afqmc
+from ad_afqmc import afqmc
 
 seed = 98
 

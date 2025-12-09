@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from ad_afqmc import config, pyscf_interface, run_afqmc, grad_utils
+from ad_afqmc import config, pyscf_interface, afqmc, grad_utils
 from pyscf import gto, scf, df
 
 config.setup_jax()
@@ -27,7 +27,7 @@ def run_check(obj, options, expected_energy, expected_grad, atol, mpi):
     # mpi_prefix = "mpirun" if mpi else None
     nproc = 2 if mpi else None
 
-    ene, _ = run_afqmc.run_afqmc(options=options, nproc=nproc, tmpdir=tmpdir)
+    ene, _ = afqmc.run_afqmc(options=options, nproc=nproc, tmpdir=tmpdir)
     grad, grad_err = grad_utils.calculate_nuc_gradients(tmpdir, printG=False)
 
     assert np.isclose(ene, expected_energy, atol)
