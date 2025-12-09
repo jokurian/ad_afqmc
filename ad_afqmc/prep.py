@@ -126,6 +126,8 @@ class PrepAfqmc:
             else:
                 raise TypeError(f"Unexpected object '{self.tmp.mf}'.")
 
+        # TODO assert basis coeff shape
+
         self.mo_basis.basis_coeff = basis_coeff
 
     def set_frozen_core(self, norb_frozen):
@@ -429,8 +431,6 @@ class PrepAfqmc:
         prep.set_mol(mf_or_cc.mol)
         prep.set_pyscf_mf_cc(mf_or_cc, mf_or_cc_ket)
         prep.set_basis_coeff(basis_coeff)
-        print("NORB FROZEN")
-        print(norb_frozen)
         prep.set_frozen_core(norb_frozen)
         prep.ao_basis.chol_cut = chol_cut
         prep.path.set(tmpdir)
