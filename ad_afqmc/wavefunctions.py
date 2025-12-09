@@ -2270,7 +2270,7 @@ class multi_ghf_cpmc(wave_function_cpmc):
         wave_data: dict,
     ) -> jax.Array:
         """
-        Multi-GHF local energy for a single UHF walker:
+        Local energy for a single UHF walker.
         """
         ci_coeffs = wave_data["ci_coeffs"]
         mo_coeffs = wave_data["mo_coeffs"]
@@ -2328,6 +2328,45 @@ class multi_ghf_cpmc(wave_function_cpmc):
         )
 
         return E_L
+
+    @partial(jit, static_argnums=0)
+    def _calc_density_corr_unrestricted(self, walker_up, walker_dn, wave_data):
+        """
+        Density correlation for a single UHF walker.
+        """
+        ci_coeffs = wave_data["ci_coeffs"]
+        mo_coeffs = wave_data["mo_coeffs"]
+
+        norb = self.norb
+        nelec_tot = self.nelec[0] + self.nelec[1]
+
+        walker_ghf = jsp.linalg.block_diag(walker_up, walker_dn)
+
+        def per_det(Ck, ck):
+            Cocc = Ck[:, :nelec_tot]
+            overlap_mat = Cocc.T.conj() @ walker_ghf
+            inv = jnp.linalg.inv(overlap_mat)
+            Gk = (walker_ghf @ inv @ Cocc.T.conj()).T
+            Gk_diag = jnp.diagonal(Gk)
+            density_corr = (
+                Gk_diag[:, None] * Gk_diag[None, :] - Gk * Gk.T + jnp.diag(Gk_diag)
+            )
+            Ok = jnp.linalg.det(overlap_mat)
+            wk = ck * Ok
+            return density_corr, wk
+
+        density_corrs, w_k = vmap(per_det, in_axes=(0, 0))(mo_coeffs, ci_coeffs)
+
+        num = jnp.sum(w_k[:, None, None] * density_corrs, axis=0).real
+        den = jnp.sum(w_k).real
+
+        density_corr = jnp.where(
+            jnp.abs(den) < 1.0e-16,
+            jnp.zeros((2 * norb, 2 * norb)),
+            num / den,
+        )
+
+        return density_corr
 
     @partial(jit, static_argnums=0)
     def _update_green(
