@@ -56,6 +56,40 @@ class PrepAfqmc:
         self.set_sampler()
         self.setup_print()
 
+    # Read/Compute/Write what is needed for the calculation
+    def prep(self):
+        self.set_options()
+        self.set_integrals()
+        self.set_trial_coeff()
+        self.set_amplitudes()
+
+    def prep_afqmc(
+        mf_or_cc,
+        mf_or_cc_ket = None,
+        basis_coeff = None,
+        norb_frozen = 0,
+        chol_cut = 1e-5,
+        integrals = None,
+        tmpdir = None,
+    ):
+        prep = PrepAfqmc()
+        prep.set_mol(mf_or_cc.mol)
+        prep.set_pyscf_mf_cc(mf_or_cc, mf_or_cc_ket)
+        prep.set_basis_coeff(basis_coeff)
+        prep.set_frozen_core(norb_frozen)
+        prep.ao_basis.chol_cut = chol_cut
+        prep.path.set(tmpdir)
+        prep.options = {}
+
+        if tmpdir is None:
+            prep.io.set_no_io()
+        else:
+            prep.io.set_write()
+
+        prep.prep()
+
+        return prep
+
     def setup_print(self):
         print(f"# norb: {self.mo_basis.norb}")
         print(f"# nelec: {(self.mo_basis.nelec_sp)}")
@@ -407,40 +441,6 @@ class PrepAfqmc:
     # TODO should only write them
     def write_amplitudes(self):
         utils.write_pyscf_ccsd(self.tmp.cc, self.path.amplitudes)
-
-    # Read/Compute/Write what is needed for the calculation
-    def prep(self):
-        self.set_options()
-        self.set_integrals() 
-        self.set_trial_coeff()
-        self.set_amplitudes()
-
-    def prep_afqmc(
-        mf_or_cc,
-        mf_or_cc_ket = None,
-        basis_coeff = None,
-        norb_frozen = 0,
-        chol_cut = 1e-5,
-        integrals = None,
-        tmpdir = None,
-    ):
-        prep = PrepAfqmc()
-        prep.set_mol(mf_or_cc.mol)
-        prep.set_pyscf_mf_cc(mf_or_cc, mf_or_cc_ket)
-        prep.set_basis_coeff(basis_coeff)
-        prep.set_frozen_core(norb_frozen)
-        prep.ao_basis.chol_cut = chol_cut
-        prep.path.set(tmpdir)
-        prep.options = {}
-
-        if tmpdir is None:
-            prep.io.set_no_io()
-        else:
-            prep.io.set_write()
-
-        prep.prep()
-
-        return prep
 
 class Path:
     __slots__ = ("tmpdir", "options", "fcidump", "trial_coeff", "amplitudes")

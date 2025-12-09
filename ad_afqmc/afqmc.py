@@ -365,7 +365,7 @@ class AFQMC:
             prep.set_mol(self.mf_or_cc.mol)
             prep.set_pyscf_mf_cc(self.mf_or_cc, self.mf_or_cc_ket)
             prep.set_basis_coeff(self.basis_coeff)
-            prep.mo_basis.norb_frozen = self.norb_frozen
+            prep.set_frozen_core(self.norb_frozen)
             prep.ao_basis.chol_cut = self.chol_cut
             prep.path.set(self.tmpdir)
             prep.options = options
