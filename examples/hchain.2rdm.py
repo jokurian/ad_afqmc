@@ -3,7 +3,7 @@ from functools import partial
 import numpy as np
 from pyscf import fci, gto, scf
 
-from ad_afqmc import pyscf_interface, run_afqmc
+from ad_afqmc import utils, afqmc
 
 print = partial(print, flush=True)
 
@@ -32,13 +32,13 @@ print(f"1e ene: {np.trace(np.dot(dm1, h1))}")
 _, rdm2_fci = fci.direct_spin1.make_rdm12(fci_vec, mol.nao, mol.nelec)
 
 # ad afqmc
-pyscf_interface.prep_afqmc(umf)
+utils.prep_afqmc(umf)
 options = {
     "n_eql": 3,
     "n_ene_blocks": 1,
     "n_sr_blocks": 50,
-    "n_blocks": 40,
-    "n_walkers": 50,
+    "n_blocks": 4, #0,
+    "n_walkers": 5, #0,
     "seed": 98,
     "walker_type": "unrestricted",
     "ad_mode": "2rdm",
@@ -50,6 +50,6 @@ options = {
 from mpi4py import MPI
 
 MPI.Finalize()
-run_afqmc.run_afqmc(options=options, nproc=4)
+afqmc.run_afqmc(options=options, nproc=4)
 
 rdm2_afqmc = np.load("rdm2_afqmc.npz")["rdm2"]

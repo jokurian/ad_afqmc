@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 from pyscf import gto, scf, fci, ci, cc
-from ad_afqmc import afqmc, config, pyscf_interface, launch_script
+from ad_afqmc import afqmc, config, utils
 import dill as pickle
 import numpy as np
 
@@ -59,7 +59,7 @@ with open("options.bin", "rb") as f:
 
 # Builds the block data from prop_data
 def calc_energy(options, mycc, prop_data_bin):
-    pyscf_interface.read_pyscf_ccsd(mycc, options["tmpdir"])
+    utils.read_pyscf_ccsd(mycc, options["tmpdir"])
 
     (
         ham_data,
@@ -72,7 +72,7 @@ def calc_energy(options, mycc, prop_data_bin):
         sampler,
         observable,
         options,
-    ) = launch_script.setup_afqmc_fp(options, options["tmpdir"])
+    ) = utils.setup_afqmc_fp(options, options["tmpdir"])
 
     ham_data = ham.build_measurement_intermediates(ham_data, trial_bra, wave_data_bra)
     ham_data = ham.build_propagation_intermediates(

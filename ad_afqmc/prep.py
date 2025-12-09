@@ -405,7 +405,7 @@ class PrepAfqmc:
         bra = self.options["trial"]
         ket = self.options["trial_ket"]
 
-        trial = ["cisd", "ucisd", "gcisd", "gcisd_complex", "ccsd", "uccsd"]
+        trial = ["cisd", "CISD", "ucisd", "UCISD", "gcisd", "gcisd_complex", "ccsd", "uccsd"]
         if not bra in trial and not ket in trial:
             return
 

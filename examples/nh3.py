@@ -4,7 +4,7 @@ import h5py
 import numpy as np
 from pyscf import gto, scf
 
-from ad_afqmc import pyscf_interface, run_afqmc
+from ad_afqmc import utils, afqmc
 
 print = partial(print, flush=True)
 
@@ -38,7 +38,7 @@ dip_ints_ao = -mol.intor_symmetric("int1e_r", comp=3)
 # )
 
 # ad afqmc
-pyscf_interface.prep_afqmc(mf, norb_frozen=norb_frozen)
+utils.prep_afqmc(mf, norb_frozen=norb_frozen)
 # frozen orbitals
 dip_ints_mo = np.empty_like(dip_ints_ao)
 dip_ints_mo_act = np.zeros(
@@ -64,5 +64,5 @@ options = {
     "ad_mode": "forward",
     "trial": "rhf",
 }
-run_afqmc.run_afqmc(options=options, nproc=4)
+afqmc.run_afqmc(options=options, nproc=4)
 

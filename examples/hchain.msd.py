@@ -1,6 +1,6 @@
 from pyscf import fci, gto, scf
 
-from ad_afqmc import pyscf_interface, run_afqmc
+from ad_afqmc import utils, afqmc
 
 r = 1.6  # 2.0
 nH = 6
@@ -15,9 +15,9 @@ ci = fci.FCI(mf)
 e_fci, _ = ci.kernel()
 print("FCI energy: ", e_fci)
 
-state_dict = pyscf_interface.get_fci_state(ci, ndets=10)
+state_dict = utils.get_fci_state(ci, ndets=10)
 
-pyscf_interface.prep_afqmc_multislater(
+utils.prep_afqmc_multislater(
     mf, state_dict, max_excitation=6, ndets=10)
 
 options = {
@@ -32,7 +32,7 @@ options = {
     "walker_type": "rhf",
 }
 
-run_afqmc.run_afqmc(options, nproc=2)
+afqmc.run_afqmc(options, nproc=2)
 
 # from ad_afqmc import driver, mpi_jax
 # ham_data, ham, prop, _, wave_data, sampler, observable, options = mpi_jax._prep_afqmc(

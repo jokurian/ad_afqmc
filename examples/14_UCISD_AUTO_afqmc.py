@@ -4,7 +4,7 @@ import h5py, pickle
 import numpy as np
 from pyscf import gto, scf, cc
 
-from ad_afqmc import afqmc, pyscf_interface, run_afqmc, config
+from ad_afqmc import afqmc, config
 import jax.numpy as jnp
 
 print = partial(print, flush=True)
