@@ -31,6 +31,7 @@ class PrepAfqmc:
 
     # Returns data needed for the afqmc calculation
     def get_setup_data(self):
+        # TODO add assert to make sure setup_afqmc has been run before
         return (
             self.tmp.ham_data,
             self.tmp.ham,
@@ -46,11 +47,7 @@ class PrepAfqmc:
 
     # Prepares the data for the afqmc calculation
     def setup_afqmc(self):
-        self.set_options()
-        self.set_integrals()
-        self.set_trial_coeff()
-        self.set_amplitudes()
-
+        # TODO add assert to make sure prep has been run before
         self.set_ham()
         self.apply_symmetry_mask()
         self.read_observable()

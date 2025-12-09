@@ -36,6 +36,7 @@ def check(obj, options, e, atol, mpi):
         from ad_afqmc.prep import PrepAfqmc
         prep = PrepAfqmc.prep_afqmc(obj, chol_cut=1e-12)
         prep.options = options
+        prep.prep()
         ene, _ = afqmc.run_afqmc_ph(prep)
 
     assert np.isclose(ene, e, atol)

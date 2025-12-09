@@ -1913,6 +1913,7 @@ def setup_afqmc(
     prep.io.set_read()
     if options is not None:
         prep.io.set_noio_options()
+    prep.prep()
     prep.setup_afqmc()
 
     return (
@@ -1966,14 +1967,16 @@ def setup_afqmc_ph(
     prep.options = options
     prep.path.set(directory)
 
-    if pyscf_prep is not None and options is not None:
-        prep.tmp.pyscf_prep = pyscf_prep
-        prep.io.set_no_io()
-        prep.from_pyscf_prep()
-        prep.setup_afqmc()
-    else:
-        prep.io.set_read()
-        prep.setup_afqmc()
+    #if pyscf_prep is not None and options is not None:
+    #    prep.tmp.pyscf_prep = pyscf_prep
+    #    prep.io.set_no_io()
+    #    prep.from_pyscf_prep()
+    #    prep.prep()
+    #    prep.setup_afqmc()
+    #else:
+    prep.io.set_read()
+    prep.prep()
+    prep.setup_afqmc()
 
     # Ensure type-narrowing for the returned options
     assert prep.options is not None
@@ -2018,6 +2021,7 @@ def setup_afqmc_fp(
     prep.options = options
     prep.path.set(directory)
     prep.io.set_read()
+    prep.prep()
     prep.setup_afqmc()
 
     # Ensure type-narrowing for the returned options
