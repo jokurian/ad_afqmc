@@ -1,7 +1,7 @@
 from pyscf import fci, gto, scf, cc
 from pyscf.scf import hf
 import numpy as np
-from ad_afqmc import wavefunctions, afqmc, run_afqmc, utils
+from ad_afqmc import wavefunctions, afqmc, utils
 import scipy.linalg as la
 import os
 
@@ -54,7 +54,7 @@ def check_hf(mol, mf):
         options["trial"] = "uhf"
         options["walker_type"] = "unrestricted"
     
-    ene1, err1 = run_afqmc.run_afqmc(options=options, mpi_prefix=None, nproc=None, tmpdir=tmpdir)
+    ene1, err1 = afqmc.run_afqmc(options=options, mpi_prefix=None, nproc=None, tmpdir=tmpdir)
     # RHF/UHF based GHF
     gmf = scf.addons.convert_to_ghf(mf)
 
@@ -63,7 +63,7 @@ def check_hf(mol, mf):
     options["trial"] = "ghf_complex"
     options["walker_type"] = "generalized"   
  
-    ene2, err2 = run_afqmc.run_afqmc(options=options, mpi_prefix=None, nproc=None, tmpdir=tmpdir)
+    ene2, err2 = afqmc.run_afqmc(options=options, mpi_prefix=None, nproc=None, tmpdir=tmpdir)
     assert np.isclose(ene1, ene2, atol=1e-6), f"{ene1} {ene2}"
     assert np.isclose(err1, err2, atol=1e-8), f"{err1} {err2}"
     
@@ -72,7 +72,7 @@ def check_hf(mol, mf):
 
     utils.prep_afqmc_ghf_complex(mol, gmf, tmpdir, chol_cut=chol_cut)
     
-    ene2, err2 = run_afqmc.run_afqmc(options=options, mpi_prefix=None, nproc=None, tmpdir=tmpdir)
+    ene2, err2 = afqmc.run_afqmc(options=options, mpi_prefix=None, nproc=None, tmpdir=tmpdir)
     assert np.isclose(ene1, ene2, atol=1e-6), f"{ene1} {ene2}"
     assert np.isclose(err1, err2, atol=1e-8), f"{err1} {err2}"
 
@@ -98,7 +98,7 @@ def check_cc(mol, mf):
         options["trial"] = "ucisd"
         options["walker_type"] = "unrestricted"
 
-    ene1, err1 = run_afqmc.run_afqmc(options=options, mpi_prefix=None, nproc=None, tmpdir=tmpdir)
+    ene1, err1 = afqmc.run_afqmc(options=options, mpi_prefix=None, nproc=None, tmpdir=tmpdir)
 
     # GCCSD
     ## GHF
@@ -115,7 +115,7 @@ def check_cc(mol, mf):
     options["trial"] = "gcisd_complex"
     options["walker_type"] = "generalized"
     
-    ene2, err2 = run_afqmc.run_afqmc(options=options, mpi_prefix=None, nproc=None, tmpdir=tmpdir)
+    ene2, err2 = afqmc.run_afqmc(options=options, mpi_prefix=None, nproc=None, tmpdir=tmpdir)
     print(f"{ene1} vs {ene2}")
     assert np.isclose(ene1, ene2, atol=1e-6), f"{ene1} vs {ene2}"
     assert np.isclose(err1, err2, atol=1e-8), f"{err1} {err2}"
@@ -132,7 +132,7 @@ def check_cc(mol, mf):
 
     utils.prep_afqmc_ghf_complex(mol, gmf, tmpdir, chol_cut=chol_cut)
 
-    ene2, err2 = run_afqmc.run_afqmc(options=options, mpi_prefix=None, nproc=None, tmpdir=tmpdir)
+    ene2, err2 = afqmc.run_afqmc(options=options, mpi_prefix=None, nproc=None, tmpdir=tmpdir)
     assert np.isclose(ene1, ene2, atol=1e-6), f"{ene1} vs {ene2}"
     assert np.isclose(err1, err2, atol=1e-8), f"{err1} {err2}"
    

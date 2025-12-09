@@ -128,6 +128,23 @@ class PrepAfqmc:
 
         self.mo_basis.basis_coeff = basis_coeff
 
+    def set_frozen_core(self, norb_frozen):
+        # Super dirty
+        if hasattr(self.tmp, "cc") and hasattr(self.tmp.cc, "frozen"):
+            if self.tmp.cc.frozen is not None:
+                norb_frozen = self.tmp.cc.frozen
+            else:
+                norb_frozen = 0
+
+        if type(norb_frozen) != int:
+            raise TypeError(f"Number of frozen orbitals must be an integer, but is '{type(norb_frozen)}'.")
+        if norb_frozen < 0:
+            raise ValueError(f"Number of frozen orbitals must be >= 0, but is '{norb_frozen}'.") 
+        if norb_frozen >= self.tmp.mf.mo_coeff.shape[-1] :
+            raise ValueError(f"Number of frozen orbitals '{norb_frozen}' must be smaller than the number of MOs '{self.tmp.mf.mo_coeff.shape[-1]}'.") 
+
+        self.mo_basis.norb_frozen = norb_frozen
+        
     ##################
     ### pyscf_prep ###
     ##################
@@ -398,6 +415,35 @@ class PrepAfqmc:
         self.set_integrals() 
         self.set_trial_coeff()
         self.set_amplitudes()
+
+    def prep_afqmc(
+        mf_or_cc,
+        mf_or_cc_ket = None,
+        basis_coeff = None,
+        norb_frozen = 0,
+        chol_cut = 1e-5,
+        integrals = None,
+        tmpdir = None,
+    ):
+        prep = PrepAfqmc()
+        prep.set_mol(mf_or_cc.mol)
+        prep.set_pyscf_mf_cc(mf_or_cc, mf_or_cc_ket)
+        prep.set_basis_coeff(basis_coeff)
+        print("NORB FROZEN")
+        print(norb_frozen)
+        prep.set_frozen_core(norb_frozen)
+        prep.ao_basis.chol_cut = chol_cut
+        prep.path.set(tmpdir)
+        prep.options = {}
+
+        if tmpdir is None:
+            prep.io.set_no_io()
+        else:
+            prep.io.set_write()
+
+        prep.prep()
+
+        return prep
 
 class Path:
     __slots__ = ("tmpdir", "options", "fcidump", "trial_coeff", "amplitudes")

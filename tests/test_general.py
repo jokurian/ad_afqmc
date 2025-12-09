@@ -28,21 +28,29 @@ def check(obj, options, e, atol, mpi):
     # write_to_disk = False and run_afqmc_ph
 
     #utils.prep_afqmc(obj, tmpdir=tmpdir, chol_cut=1e-12, write_to_disk=True)
-    pyscf_prep = utils.prep_afqmc(obj, tmpdir=tmpdir, chol_cut=1e-12, write_to_disk=False)
+    #pyscf_prep = utils.prep_afqmc(obj, tmpdir=tmpdir, chol_cut=1e-12, write_to_disk=False)
 
     if mpi:
         mpi_prefix = "mpirun "
         nproc = 2
+        prep.prep_afqmc(obj, chol_cut=1e-12, tmpdir=tmpdir)
+        ene, _ = afqmc.run_afqmc(
+            options=options, mpi_prefix=mpi_prefix, nproc=nproc, tmpdir=tmpdir
+        )
     else:
         mpi_prefix = None
         nproc = None
+        from ad_afqmc.prep import PrepAfqmc
+        prep = PrepAfqmc.prep_afqmc(obj, chol_cut=1e-12)
+        prep.options = options
+        ene, _ = afqmc.run_afqmc_ph(prep)
 
     #ene, _ = run_afqmc.run_afqmc(
     #    options=options, mpi_prefix=mpi_prefix, nproc=nproc, tmpdir=tmpdir
     #)
-    ene, _ = run_afqmc.run_afqmc_ph(
-        pyscf_prep, options=options, mpi_prefix=mpi_prefix, nproc=nproc, tmpdir=tmpdir
-    )
+    #ene, _ = run_afqmc.run_afqmc_ph(
+    #    pyscf_prep, options=options, mpi_prefix=mpi_prefix, nproc=nproc, tmpdir=tmpdir
+    #)
 
     assert np.isclose(ene, e, atol)
     return ene
