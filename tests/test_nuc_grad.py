@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from ad_afqmc import config, pyscf_interface, afqmc, grad_utils
+from ad_afqmc import config, afqmc, grad_utils
 from pyscf import gto, scf, df
 
 config.setup_jax()

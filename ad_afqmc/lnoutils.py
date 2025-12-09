@@ -1,6 +1,6 @@
 import numpy as np
 from pyscf import __config__, ao2mo, df, dft, lib, mcscf, scf, lo
-from ad_afqmc.pyscf_interface import *
+from ad_afqmc.utils import *
 import os
 import re
 

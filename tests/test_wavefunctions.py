@@ -7,7 +7,7 @@ from ad_afqmc import config
 config.setup_jax()
 from jax import numpy as jnp
 
-from ad_afqmc import pyscf_interface, wavefunctions
+from ad_afqmc import utils, wavefunctions
 
 seed = 102
 np.random.seed(seed)
@@ -39,7 +39,7 @@ ham_data["normal_ordering_term"] = -0.5 * jnp.einsum(
 
 multislater = wavefunctions.multislater(norb, nelec, max_excitation=6)
 path = os.path.dirname(os.path.abspath(__file__))
-Acre, Ades, Bcre, Bdes, coeff, ref_det = pyscf_interface.get_excitations(
+Acre, Ades, Bcre, Bdes, coeff, ref_det = utils.get_excitations(
     fname=path + "/dets.bin", max_excitation=6, ndets=10
 )  # reads dets.bin
 ref_det = jnp.array([[1, 1, 1, 1, 1, 0, 0, 0, 0, 0] * 2])
