@@ -4,6 +4,7 @@ import numpy as np
 import pickle
 from ad_afqmc import utils
 
+import pyscf
 from pyscf.cc.ccsd import CCSD
 from pyscf.cc.uccsd import UCCSD
 from pyscf.cc.gccsd import GCCSD
@@ -132,6 +133,8 @@ class PrepAfqmc:
         self.tmp.sampler = utils.set_sampler(self.options)
 
     def set_mol(self, mol):
+        if not isinstance(mol, pyscf.gto.Mole):
+            raise TypeError(f"Expected an argument of type {type(pyscf.gto.Mole)} but received '{mol}'.")
         self.tmp.mol = mol
         self.mol.spin = mol.spin
         self.mol.n_a, self.mol.n_b = mol.nelec
