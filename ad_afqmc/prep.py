@@ -181,60 +181,6 @@ class PrepAfqmc:
 
         self.mo_basis.norb_frozen = norb_frozen
         
-    ##################
-    ### pyscf_prep ###
-    ##################
-    def from_pyscf_prep(self):
-        assert hasattr(self.tmp, "pyscf_prep")
-        assert self.tmp.pyscf_prep is not None
-
-        [nelec, norb, ms, nchol] = self.tmp.pyscf_prep["header"]
-        h0 = np.array(self.tmp.pyscf_prep.get("energy_core"))
-        h1 = np.array(self.tmp.pyscf_prep.get("hcore")).reshape(norb, norb)
-        h1_mod = np.array(self.tmp.pyscf_prep.get("hcore_mod")).reshape(norb, norb)
-        chol = np.array(self.tmp.pyscf_prep.get("chol")).reshape(-1, norb, norb)
-        assert type(ms) is np.int64
-        assert type(nelec) is np.int64
-        assert type(norb) is np.int64
-        ms, nelec, norb = int(ms), int(nelec), int(norb)
-        nelec_sp = ((nelec + abs(ms)) // 2, (nelec - abs(ms)) // 2)
-        mo_coeff = np.array(self.tmp.pyscf_prep["trial_coeffs"])
-
-        if "amplitudes" in self.tmp.pyscf_prep:
-            self.tmp.amplitudes = self.tmp.pyscf_prep["amplitudes"]
-
-        self.mo_basis.norb = norb
-        self.mo_basis.h0 = h0
-        self.mo_basis.h1 = h1
-        self.mo_basis.h1_mod = h1_mod
-        self.mo_basis.chol = chol
-        self.ao_basis.n_chol = chol.shape[0]
-        self.mo_basis.nelec_sp = nelec_sp
-        self.mo_basis.trial_coeff = mo_coeff
-        self.tmp.observable = None
-
-        #self.set_options()
-
-    def to_pyscf_prep(self):
-        pyscf_prep = {}
-
-        pyscf_prep["header"] = np.array([
-            sum(self.mo_basis.nelec_sp),
-            self.mo_basis.norb,
-            self.mol.spin,
-            self.mo_basis.chol.shape[0]
-        ])
-        pyscf_prep["hcore"] = self.mo_basis.h1.flatten()
-        pyscf_prep["hcore_mod"] = self.mo_basis.h1_mod.flatten()
-        pyscf_prep["chol"] = self.mo_basis.chol.flatten()
-        pyscf_prep["energy_core"] = self.mo_basis.h0
-        #if self.mo_basis.trial_coeff is not None:
-        pyscf_prep["trial_coeffs"] = self.mo_basis.trial_coeff
-        if hasattr(self.tmp, "amplitudes"): # Super dirty
-            pyscf_prep["amplitudes"] = self.tmp.amplitudes
-
-        return pyscf_prep
-
     ###############
     ### Options ###
     ###############
