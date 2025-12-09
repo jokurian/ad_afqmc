@@ -78,8 +78,8 @@ class PrepAfqmc:
         prep.set_pyscf_mf_cc(mf_or_cc, mf_or_cc_ket)
         prep.set_basis_coeff(basis_coeff)
         prep.set_frozen_core(norb_frozen)
-        prep.ao_basis.chol_cut = chol_cut
-        prep.path.set(tmpdir)
+        prep.set_chol_cut(chol_cut)
+        prep.set_tmpdir(tmpdir)
         prep.options = {}
 
         if tmpdir is None:
@@ -180,7 +180,18 @@ class PrepAfqmc:
             raise ValueError(f"Number of frozen orbitals '{norb_frozen}' must be smaller than the number of MOs '{self.tmp.mf.mo_coeff.shape[-1]}'.") 
 
         self.mo_basis.norb_frozen = norb_frozen
-        
+
+    def set_chol_cut(self, chol_cut):
+        if type(chol_cut) != float:
+            raise TypeError(f"chol_cut expected to be a float but has type '{type(chol_cut)}'.")
+        if chol_cut < 0.0:
+            raise ValueError(f"chol_cut expected to be >= 0.")
+
+        self.ao_basis.chol_cut = chol_cut
+
+    def set_tmpdir(self, tmpdir):
+        self.path.set(tmpdir)
+
     ###############
     ### Options ###
     ###############
@@ -403,6 +414,10 @@ class Path:
 
     # Brute-force
     def set(self, path):
+        t = type(path)
+        if t != str and t is not type(None):
+            raise TypeError(f"Expected a string/NoneType but received '{t}'.")
+
         for attr in self.__slots__:
             setattr(self, attr, path)
 

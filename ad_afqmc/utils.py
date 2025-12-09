@@ -1909,7 +1909,7 @@ def setup_afqmc(
 
     prep = PrepAfqmc()
     prep.options = options
-    prep.path.set(directory)
+    prep.set_tmpdir(directory)
     prep.io.set_read()
     if options is not None:
         prep.io.set_noio_options()
@@ -1965,15 +1965,7 @@ def setup_afqmc_ph(
 
     prep = PrepAfqmc()
     prep.options = options
-    prep.path.set(directory)
-
-    #if pyscf_prep is not None and options is not None:
-    #    prep.tmp.pyscf_prep = pyscf_prep
-    #    prep.io.set_no_io()
-    #    prep.from_pyscf_prep()
-    #    prep.prep()
-    #    prep.setup_afqmc()
-    #else:
+    prep.set_tmpdir(directory)
     prep.io.set_read()
     prep.prep()
     prep.setup_afqmc()
@@ -2019,7 +2011,7 @@ def setup_afqmc_fp(
 
     prep = PrepAfqmc()
     prep.options = options
-    prep.path.set(directory)
+    prep.set_tmpdir(directory)
     prep.io.set_read()
     prep.prep()
     prep.setup_afqmc()
