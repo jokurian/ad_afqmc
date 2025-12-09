@@ -83,7 +83,7 @@ class PrepAfqmc:
         prep.options = {}
 
         if tmpdir is None:
-            prep.io.set_no_io()
+            prep.io.set_noio()
         else:
             prep.io.set_write()
 
@@ -208,7 +208,7 @@ class PrepAfqmc:
         if io.is_read():
             self.read_options()
         # Compute
-        elif io.is_write() or io.is_no_io():
+        elif io.is_write() or io.is_noio():
             self.options = utils.get_options(self.options)
             self.mol.ene0 = self.options["ene0"]
         else:
@@ -245,7 +245,7 @@ class PrepAfqmc:
         if io.is_read():
             self.read_fcidump()
         # Compute
-        elif io.is_write() or io.is_no_io():
+        elif io.is_write() or io.is_noio():
             if self.mo_basis.chol is None:
                 self.compute_integrals()
         else:
@@ -327,7 +327,7 @@ class PrepAfqmc:
             self.read_trial_coeff()
 
         # Compute
-        elif io.is_write() or io.is_no_io():
+        elif io.is_write() or io.is_noio():
             if self.mo_basis.trial_coeff is None:
                 self.mo_basis.trial_coeff = utils.get_trial_coeffs(
                     self.tmp.mol, # TODO Remove, only needed for the overlap
@@ -382,7 +382,7 @@ class PrepAfqmc:
             # path should also contain the filename
             self.tmp.amplitudes = np.load(self.path.amplitudes + "/amplitudes.npz")
         # Compute
-        elif io.is_write() or io.is_no_io():
+        elif io.is_write() or io.is_noio():
             if not hasattr(self.tmp, "amplitudes"): # Super dirty
                 if not hasattr(self.tmp, "cc"): # Super dirty
                     raise AttributeError(f"self.tmp.cc must exist and point to the cc pyscf object in order to compute the amplitudes.")
@@ -545,7 +545,7 @@ class IOMode(Enum):
     def is_write(self):
         return self is self.Write
 
-    def is_no_io(self):
+    def is_noio(self):
         return self is self.NoIO
 
     def check(io_mode):
@@ -566,7 +566,7 @@ class IO:
         for attr in self.__slots__:
             setattr(self, attr, io_mode)
 
-    def set_no_io(self):
+    def set_noio(self):
         self.set(IOMode.NoIO)
 
     def set_read(self):

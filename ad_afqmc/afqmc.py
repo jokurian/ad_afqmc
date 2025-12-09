@@ -373,7 +373,7 @@ class AFQMC:
             if dry_run:
                 prep.io.set_write()
             else:
-                prep.io.set_no_io()
+                prep.io.set_noio()
 
             prep.prep()
         else:
