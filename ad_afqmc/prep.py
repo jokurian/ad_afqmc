@@ -399,6 +399,7 @@ class PrepAfqmc:
         self.tmp.amplitudes = utils.get_ci_amplitudes_from_cc(self.pyscf.cc)
 
     # TODO should only write them
+    # TODO should check amplitude shapes to avoid issue when using frozen orbitals
     def write_amplitudes(self):
         utils.write_pyscf_ccsd(self.pyscf.cc, self.path.amplitudes)
 
@@ -474,6 +475,7 @@ class MoBasis:
 # Options should be divided, it does not make any sense to have AD, LNO, nuclear
 # gradient, symmetry, ... keywords here as their number is becoming large.
 # I don't think mode should be here.
+# Default options from AFQMC class differ from the ones in utils...
 class Options:
     # To catch typos...
     __slots__ = ("dt", "n_prop_steps", "n_ene_blocks",
@@ -583,7 +585,6 @@ class IO:
 def _make_setter(field, io_mode):
     def setter(self):
         setattr(self, field, io_mode)
-    #setter.__name__ = f"set_{io_mode.name.lower()}_{field}"
     return setter
 
 for field in IO.__slots__:
