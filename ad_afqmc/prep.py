@@ -16,7 +16,7 @@ from pyscf.scf.ghf import GHF
 class PrepAfqmc:
     __slots__ = (
         "mol", "ao_basis", "mo_basis", "options",
-        "ci", "cc", "trial", "path", "tmp", "io"
+        "ci", "cc", "trial", "path", "tmp", "io", "pyscf"
     )
     def __init__(self):
         self.mol = Mol()
@@ -29,6 +29,7 @@ class PrepAfqmc:
         self.path = Path()
         self.tmp = Tmp()
         self.io = IO()
+        self.pyscf = Pyscf()
 
     # Returns data needed for the afqmc calculation
     def get_setup_data(self):
@@ -135,49 +136,50 @@ class PrepAfqmc:
     def set_mol(self, mol):
         if not isinstance(mol, pyscf.gto.Mole):
             raise TypeError(f"Expected an argument of type {type(pyscf.gto.Mole)} but received '{mol}'.")
-        self.tmp.mol = mol
+        self.pyscf.mol = mol
         self.mol.spin = mol.spin
         self.mol.n_a, self.mol.n_b = mol.nelec
+        self.ao_basis.n_ao = mol.nao
+        self.ao_basis.overlap = mol.intor('int1e_ovlp')
 
     def set_pyscf_mf_cc(self, mf_or_cc, mf_or_cc_ket):
         if isinstance(mf_or_cc, (CCSD, UCCSD, GCCSD)):
-            self.tmp.mf = mf_or_cc._scf
-            self.tmp.cc = mf_or_cc
+            self.pyscf.mf = mf_or_cc._scf
+            self.pyscf.cc = mf_or_cc
         elif isinstance(mf_or_cc_ket, (CCSD, UCCSD, GCCSD)):
-            self.tmp.mf = mf_or_cc_ket._scf
-            self.tmp.cc = mf_or_cc_ket
+            self.pyscf.mf = mf_or_cc_ket._scf
+            self.pyscf.cc = mf_or_cc_ket
         elif isinstance(mf_or_cc, (RHF, ROHF, UHF, GHF)):
-            self.tmp.mf = mf_or_cc
+            self.pyscf.mf = mf_or_cc
         else:
             raise TypeError(f"Unexpected object '{mf_or_cc}'.")
 
     def set_basis_coeff(self, basis_coeff):
         if basis_coeff is None:
-            if isinstance(self.tmp.mf, UHF):
-                basis_coeff = self.tmp.mf.mo_coeff[0]
-            elif isinstance(self.tmp.mf, (RHF, ROHF, GHF)):
-                basis_coeff = self.tmp.mf.mo_coeff
+            if isinstance(self.pyscf.mf, UHF):
+                basis_coeff = self.pyscf.mf.mo_coeff[0]
+            elif isinstance(self.pyscf.mf, (RHF, ROHF, GHF)):
+                basis_coeff = self.pyscf.mf.mo_coeff
             else:
-                raise TypeError(f"Unexpected object '{self.tmp.mf}'.")
+                raise TypeError(f"Unexpected object '{self.pyscf.mf}'.")
 
         # TODO assert basis coeff shape
-
         self.mo_basis.basis_coeff = basis_coeff
 
     def set_frozen_core(self, norb_frozen):
         # Super dirty
-        if hasattr(self.tmp, "cc") and hasattr(self.tmp.cc, "frozen"):
-            if self.tmp.cc.frozen is not None:
-                norb_frozen = self.tmp.cc.frozen
+        if self.pyscf.cc is not None and hasattr(self.pyscf.cc, "frozen"):
+            if self.pyscf.cc.frozen is not None:
+                norb_frozen = self.pyscf.cc.frozen
             else:
                 norb_frozen = 0
 
         if type(norb_frozen) != int:
             raise TypeError(f"Number of frozen orbitals must be an integer, but is '{type(norb_frozen)}'.")
         if norb_frozen < 0:
-            raise ValueError(f"Number of frozen orbitals must be >= 0, but is '{norb_frozen}'.") 
-        if norb_frozen >= self.tmp.mf.mo_coeff.shape[-1] :
-            raise ValueError(f"Number of frozen orbitals '{norb_frozen}' must be smaller than the number of MOs '{self.tmp.mf.mo_coeff.shape[-1]}'.") 
+            raise ValueError(f"Number of frozen orbitals must be >= 0, but is '{norb_frozen}'.")
+        if norb_frozen >= self.pyscf.mf.mo_coeff.shape[-1] :
+            raise ValueError(f"Number of frozen orbitals '{norb_frozen}' must be smaller than the number of MOs '{self.pyscf.mf.mo_coeff.shape[-1]}'.")
 
         self.mo_basis.norb_frozen = norb_frozen
 
@@ -260,8 +262,8 @@ class PrepAfqmc:
         # TODO the function compute_cholesky_integrals should be split
         # mol and mf should be removed
         h1e, chol, nelec, enuc, _, _ = utils.compute_cholesky_integrals(
-            self.tmp.mol,
-            self.tmp.mf,
+            self.pyscf.mol,
+            self.pyscf.mf,
             self.mo_basis.basis_coeff,
             self.ao_basis.custom_integrals,
             self.mo_basis.norb_frozen,
@@ -330,8 +332,8 @@ class PrepAfqmc:
         elif io.is_write() or io.is_noio():
             if self.mo_basis.trial_coeff is None:
                 self.mo_basis.trial_coeff = utils.get_trial_coeffs(
-                    self.tmp.mol, # TODO Remove, only needed for the overlap
-                    self.tmp.mf, # TODO Replace with MoType
+                    self.pyscf.mol, # TODO Remove, only needed for the overlap
+                    self.pyscf.mf, # TODO Replace with MoType
                     self.mo_basis.basis_coeff,
                     self.mo_basis.norb,
                     self.mo_basis.norb_frozen,
@@ -350,8 +352,8 @@ class PrepAfqmc:
     # TODO write should only write them
     def write_trial_coeff(self):
         utils.write_trial_coeffs(
-            self.tmp.mol,
-            self.tmp.mf,
+            self.pyscf.mol,
+            self.pyscf.mf,
             self.mo_basis.basis_coeff,
             self.mo_basis.norb,
             self.mo_basis.norb_frozen,
@@ -379,14 +381,10 @@ class PrepAfqmc:
 
         # Read
         if io.is_read():
-            # path should also contain the filename
             self.tmp.amplitudes = np.load(self.path.amplitudes + "/amplitudes.npz")
         # Compute
         elif io.is_write() or io.is_noio():
-            if not hasattr(self.tmp, "amplitudes"): # Super dirty
-                if not hasattr(self.tmp, "cc"): # Super dirty
-                    raise AttributeError(f"self.tmp.cc must exist and point to the cc pyscf object in order to compute the amplitudes.")
-                self.set_ci_from_cc()
+            self.set_ci_from_cc()
         else:
             raise ValueError(f"io should be IOMode.Read/Write/NoIO, not {io}.")
 
@@ -396,11 +394,13 @@ class PrepAfqmc:
             self.io.set_read_amplitudes()
 
     def set_ci_from_cc(self):
-        self.tmp.amplitudes = utils.get_ci_amplitudes_from_cc(self.tmp.cc)
+        if self.pyscf.cc is None:
+            raise AttributeError(f"self.pyscf.cc must exist and point to the cc pyscf object in order to compute the amplitudes.")
+        self.tmp.amplitudes = utils.get_ci_amplitudes_from_cc(self.pyscf.cc)
 
     # TODO should only write them
     def write_amplitudes(self):
-        utils.write_pyscf_ccsd(self.tmp.cc, self.path.amplitudes)
+        utils.write_pyscf_ccsd(self.pyscf.cc, self.path.amplitudes)
 
 class Path:
     __slots__ = ("tmpdir", "options", "fcidump", "trial_coeff", "amplitudes")
@@ -531,6 +531,9 @@ class Options:
         return {slot: getattr(self, slot) for slot in self.__slots__}
 
     def from_dict(self, options: dict):
+        t = type(options)
+        if t != type(dict):
+            raise TypeError(f"Expected a dict but received '{t}'.")
         for key, val in options.items():
             setattr(self, key, val)
 
@@ -562,7 +565,7 @@ class IO:
         self.amplitudes = None
 
     def set(self, io_mode):
-        assert io_mode in IOMode
+        IOMode.check(io_mode)
         for attr in self.__slots__:
             setattr(self, attr, io_mode)
 
@@ -587,3 +590,11 @@ for field in IO.__slots__:
     for io_mode in IOMode:
         fname = f"set_{io_mode.name.lower()}_{field}"
         setattr(IO, fname, _make_setter(field, io_mode))
+
+class Pyscf:
+    __slots__ = ("mol", "mf", "cc")
+
+    def __init__(self):
+        self.mol = None
+        self.mf = None
+        self.cc = None
