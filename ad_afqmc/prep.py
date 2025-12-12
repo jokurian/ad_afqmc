@@ -232,9 +232,11 @@ class PrepAfqmc:
 
     def replace_options(self, options):
         if self.options == {}:
-            raise ValueError("The dict must not be empty.")
+            raise ValueError("PrepAfqmc.options must not be empty dict.")
         if type(self.options) != type({}):
-            raise TypeError(f"Expected a dict but received a '{type(options)}'")
+            raise TypeError(f"PrepAfqmc.options must be a dict but is '{type(options)}'.")
+        if type(options) != type({}):
+            raise TypeError(f"Expected a dict but received a '{type(options)}'.")
 
         for key, value in options.items():
             if key not in self.options:
@@ -259,8 +261,8 @@ class PrepAfqmc:
             self.read_fcidump()
         # Compute
         elif io.is_write() or io.is_noio():
-            if self.mo_basis.chol is None:
-                self.compute_integrals()
+            #if self.mo_basis.chol is None:
+            self.compute_integrals()
         else:
             raise ValueError(f"io should be IOMode.Read/Write/NoIO, not {io}.")
 
@@ -341,14 +343,14 @@ class PrepAfqmc:
 
         # Compute
         elif io.is_write() or io.is_noio():
-            if self.mo_basis.trial_coeff is None:
-                self.mo_basis.trial_coeff = utils.get_trial_coeffs(
-                    self.pyscf.mol, # TODO Remove, only needed for the overlap
-                    self.pyscf.mf, # TODO Replace with MoType
-                    self.mo_basis.basis_coeff,
-                    self.mo_basis.norb,
-                    self.mo_basis.norb_frozen,
-                )
+            #if self.mo_basis.trial_coeff is None:
+            self.mo_basis.trial_coeff = utils.get_trial_coeffs(
+                self.pyscf.mol, # TODO Remove, only needed for the overlap
+                self.pyscf.mf, # TODO Replace with MoType
+                self.mo_basis.basis_coeff,
+                self.mo_basis.norb,
+                self.mo_basis.norb_frozen,
+            )
         else:
             raise ValueError(f"io should be IOMode.Read/Write/NoIO, not {io}.")
 
@@ -482,73 +484,6 @@ class MoBasis:
         class Restricted: pass
         class Unrestricted: pass
         class Generalized: pass
-
-# Options should be divided, it does not make any sense to have AD, LNO, nuclear
-# gradient, symmetry, ... keywords here as their number is becoming large.
-# I don't think mode should be here.
-# Default options from AFQMC class differ from the ones in utils...
-class Options:
-    # To catch typos...
-    __slots__ = ("dt", "n_prop_steps", "n_ene_blocks",
-    "n_walkers", "n_sr_blocks", "n_blocks", "n_ene_blocks_eql",
-    "n_sr_blocks_eql", "n_eql", "seed", "ad_mode", "orbital_rotation",
-    "do_sr", "walker_type", "symmetry_projector", "ngrid", "optimize_trial",
-    "target_spin", "symmetry", "save_walkers", "dR", "free_projection",
-    "ene0", "n_chunks", "vhs_mixed_precision", "trial_mixed_precision",
-    "memory_mode", "write_to_disk", "prjlo",
-    )
-
-    def __init__(self, mode):
-        self.dt = 0.005
-        self.n_prop_steps = 50
-        self.n_ene_blocks = 1
-        if mode == "small":
-            self.n_walkers = 50
-            self.n_sr_blocks = 1
-            self.n_blocks = 200
-            self.n_ene_blocks_eql = 1
-            self.n_sr_blocks_eql = 5
-            self.n_eql = 10
-        elif mode == "production":
-            self.n_walkers = 200
-            self.n_sr_blocks = 20
-            self.n_blocks = 500
-            self.n_ene_blocks_eql = 5
-            self.n_sr_blocks_eql = 10
-            self.n_eql = 3
-        self.seed = np.random.randint(1, int(1e6))
-        self.ad_mode = None
-        self.orbital_rotation = True
-        self.do_sr = True
-        self.walker_type = "restricted"
-
-        # this can be tr, s2 or sz for time-reversal, S^2, or S_z symmetry projection, respectively
-        self.symmetry_projector = None
-        self.ngrid = 4 # Number of grid point for the quadrature
-        self.optimize_trial = False
-        self.target_spin = 0  # 2S and is only used when symmetry_projector is s2
-        self.symmetry = False
-        self.save_walkers = False
-        self.dR = 1e-5  # displacement used in finite difference to calculate integral gradients for ad_mode = nuc_grad
-        self.free_projection = False
-
-        self.ene0 = 0.0
-        self.n_chunks = 1
-        self.vhs_mixed_precision = False
-        self.trial_mixed_precision = False
-        self.memory_mode = "low"
-        self.write_to_disk = False # Write FCIDUMP and ci/cc coeff to disk
-        self.prjlo = None  # used in LNO, need to fix
-
-    def to_dict(self):
-        return {slot: getattr(self, slot) for slot in self.__slots__}
-
-    def from_dict(self, options: dict):
-        t = type(options)
-        if t != type(dict):
-            raise TypeError(f"Expected a dict but received '{t}'.")
-        for key, val in options.items():
-            setattr(self, key, val)
 
 class IOMode(Enum):
     Read = auto()
