@@ -230,6 +230,17 @@ class PrepAfqmc:
         with open(self.path.options+"/options.bin", "wb") as f:
             pickle.dump(self.options, f)
 
+    def replace_options(self, options):
+        if self.options == {}:
+            raise ValueError("The dict must not be empty.")
+        if type(self.options) != type({}):
+            raise TypeError(f"Expected a dict but received a '{type(options)}'")
+
+        for key, value in options.items():
+            if key not in self.options:
+                raise KeyError(f"Key '{key}' not found.")
+            self.options[key] = value
+
     #################
     ### Integrals ###
     #################
@@ -368,7 +379,7 @@ class PrepAfqmc:
         ket = self.options["trial_ket"]
 
         trial = ["cisd", "CISD", "ucisd", "UCISD", "gcisd", "gcisd_complex", "ccsd", "uccsd"]
-        if not bra in trial and not ket in trial:
+        if not bra in trial and not ket in trial and self.pyscf.cc is None:
             return
 
         io = self.io.amplitudes

@@ -1,5 +1,6 @@
 from pyscf import scf, gto, cc
 from ad_afqmc import utils, afqmc, afqmc
+from ad_afqmc.prep import PrepAfqmc
 import numpy as np
 import os
 
@@ -19,7 +20,7 @@ options = {
 "seed": 8,
 "trial": "",
 "walker_type": "",
-"tmpdir": tmpdir,
+#"tmpdir": tmpdir,
 }
 
 def check(obj, options, e, atol, mpi):
@@ -33,10 +34,8 @@ def check(obj, options, e, atol, mpi):
     else:
         mpi_prefix = None
         nproc = None
-        from ad_afqmc.prep import PrepAfqmc
         prep = PrepAfqmc.prep_afqmc(obj, chol_cut=1e-12)
-        prep.options = options
-        prep.prep()
+        prep.replace_options(options)
         ene, _ = afqmc.run_afqmc_ph(prep)
 
     assert np.isclose(ene, e, atol)
