@@ -135,7 +135,7 @@ class PrepAfqmc:
 
     def set_mol(self, mol):
         if not isinstance(mol, pyscf.gto.Mole):
-            raise TypeError(f"Expected an argument of type {type(pyscf.gto.Mole)} but received '{mol}'.")
+            raise TypeError(f"Expected an argument of type '{type(pyscf.gto.Mole)}' but received '{type(mol)}'.")
         self.pyscf.mol = mol
         self.mol.spin = mol.spin
         self.mol.n_a, self.mol.n_b = mol.nelec
@@ -143,25 +143,11 @@ class PrepAfqmc:
         self.ao_basis.overlap = mol.intor('int1e_ovlp')
 
     def set_pyscf_mf_cc(self, mf_or_cc, mf_or_cc_ket):
-        if isinstance(mf_or_cc, (CCSD, UCCSD, GCCSD)):
-            self.pyscf.mf = mf_or_cc._scf
-            self.pyscf.cc = mf_or_cc
-        elif isinstance(mf_or_cc_ket, (CCSD, UCCSD, GCCSD)):
-            self.pyscf.mf = mf_or_cc_ket._scf
-            self.pyscf.cc = mf_or_cc_ket
-        elif isinstance(mf_or_cc, (RHF, ROHF, UHF, GHF)):
-            self.pyscf.mf = mf_or_cc
-        else:
-            raise TypeError(f"Unexpected object '{mf_or_cc}'.")
+        self.pyscf.set_mf_cc(mf_or_cc, mf_or_cc_ket)
 
     def set_basis_coeff(self, basis_coeff):
         if basis_coeff is None:
-            if isinstance(self.pyscf.mf, UHF):
-                basis_coeff = self.pyscf.mf.mo_coeff[0]
-            elif isinstance(self.pyscf.mf, (RHF, ROHF, GHF)):
-                basis_coeff = self.pyscf.mf.mo_coeff
-            else:
-                raise TypeError(f"Unexpected object '{self.pyscf.mf}'.")
+            basis_coeff = self.pyscf.get_basis_coeff()
 
         # TODO assert basis coeff shape
         self.mo_basis.basis_coeff = basis_coeff
@@ -545,3 +531,25 @@ class Pyscf:
         self.mol = None
         self.mf = None
         self.cc = None
+
+    def set_mf_cc(self, mf_or_cc, mf_or_cc_ket):
+        if isinstance(mf_or_cc, (CCSD, UCCSD, GCCSD)):
+            self.mf = mf_or_cc._scf
+            self.cc = mf_or_cc
+        elif isinstance(mf_or_cc_ket, (CCSD, UCCSD, GCCSD)):
+            self.mf = mf_or_cc_ket._scf
+            self.cc = mf_or_cc_ket
+        elif isinstance(mf_or_cc, (RHF, ROHF, UHF, GHF)):
+            self.mf = mf_or_cc
+        else:
+            raise TypeError(f"Unexpected object '{mf_or_cc}'.")
+
+    def get_basis_coeff(self):
+        if isinstance(self.mf, UHF):
+            basis_coeff = self.mf.mo_coeff[0]
+        elif isinstance(self.mf, (RHF, ROHF, GHF)):
+            basis_coeff = self.mf.mo_coeff
+        else:
+            raise TypeError(f"Unexpected object '{self.mf}'.")
+
+        return basis_coeff
