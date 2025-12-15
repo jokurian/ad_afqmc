@@ -30,6 +30,10 @@ chol_g = chol_g.reshape(nchol, -1)
 
 ham_handler = hamiltonian.hamiltonian(norb)
 
+fields = random.normal(
+    random.PRNGKey(seed), shape=(n_walkers, chol.shape[0])
+)
+
 # -----------------------------------------------------------------------------
 # RHF propagator.
 trial = wavefunctions.rhf(norb, nelec)
@@ -44,10 +48,10 @@ ham_data["h0"] = h0
 ham_data["h1"] = h1.copy()
 ham_data["chol"] = chol.copy()
 ham_data["ene0"] = 0.0
+ham_data = ham_handler.build_measurement_intermediates(ham_data, trial, wave_data)
 ham_data = ham_handler.build_propagation_intermediates(
     ham_data, prop_handler, trial, wave_data
 )
-ham_data = ham_handler.build_measurement_intermediates(ham_data, trial, wave_data)
 
 prop_data = prop_handler.init_prop_data(trial, wave_data, ham_data, seed)
 # prop_data["key"] = random.PRNGKey(seed)
@@ -79,20 +83,16 @@ ham_data_u["h0"] = h0
 ham_data_u["h1"] = h1.copy()
 ham_data_u["chol"] = chol.copy()
 ham_data_u["ene0"] = 0.0
-ham_data_u = ham_handler.build_propagation_intermediates(
-    ham_data_u, prop_handler_u, trial_u, wave_data_u
-)
 ham_data_u = ham_handler.build_measurement_intermediates(
     ham_data_u, trial_u, wave_data_u
+)
+ham_data_u = ham_handler.build_propagation_intermediates(
+    ham_data_u, prop_handler_u, trial_u, wave_data_u
 )
 
 prop_data_u = prop_handler_u.init_prop_data(trial_u, wave_data_u, ham_data_u, seed)
 # prop_data_u["key"] = random.PRNGKey(seed)
 prop_data_u["overlaps"] = trial_u.calc_overlap(prop_data_u["walkers"], wave_data_u)
-
-fields = random.normal(
-    random.PRNGKey(seed), shape=(prop_handler.n_walkers, ham_data["chol"].shape[0])
-)
 
 # -----------------------------------------------------------------------------
 # GHF propagator from UHF.
@@ -104,19 +104,28 @@ prop_handler_g = propagation.propagator_afqmc(
 
 wave_data_g = {}
 wave_data_g["mo_coeff"] = jsp.linalg.block_diag(*wave_data_u["mo_coeff"])
-wave_data_g["rdm1"] = wave_data_g["mo_coeff"] @ wave_data_g["mo_coeff"].T
+wave_data_g["rdm1"] = jnp.array([wave_data_g["mo_coeff"] @ wave_data_g["mo_coeff"].T])
 
 ham_data_g = {}
 ham_data_g["h0"] = h0
 ham_data_g["h1"] = jsp.linalg.block_diag(*h1)
 ham_data_g["chol"] = chol_g.copy()
 ham_data_g["ene0"] = 0.0
-ham_data_g = ham_handler.build_propagation_intermediates(
-    ham_data_g, prop_handler_g, trial_g, wave_data_g
-)
 ham_data_g = ham_handler.build_measurement_intermediates(
     ham_data_g, trial_g, wave_data_g
 )
+ham_data_g = ham_handler.build_propagation_intermediates(
+    ham_data_g, prop_handler_g, trial_g, wave_data_g
+)
+
+np.testing.assert_allclose(wave_data_g["rdm1"][0], sp.linalg.block_diag(*wave_data_u["rdm1"]))
+np.testing.assert_allclose(
+        ham_data_g["mf_shifts"], ham_data_u["mf_shifts"])
+np.testing.assert_allclose(ham_data_g['h1'], sp.linalg.block_diag(*ham_data_u['h1']))
+np.testing.assert_allclose(ham_data_g['v0'], sp.linalg.block_diag(ham_data_u['v0'], ham_data_u['v0']))
+np.testing.assert_allclose(ham_data_g['v1'], sp.linalg.block_diag(ham_data_u['v1'], ham_data_u['v1']))
+np.testing.assert_allclose(ham_data_g['h1_mod'], sp.linalg.block_diag(*ham_data_u['h1_mod']))
+np.testing.assert_allclose(ham_data_g['exp_h1'], sp.linalg.block_diag(*ham_data_u['exp_h1']))
 
 init_walkers = np.zeros((n_walkers, 2*norb, nocc), dtype=np.complex128)
 for iw in range(n_walkers):
@@ -140,15 +149,15 @@ prop_handler_cpmc_u = propagation.propagator_cpmc(
 
 ham_data_cpmc_u = {}
 ham_data_cpmc_u["h0"] = h0
-ham_data_cpmc_u["h1"] = h1
-ham_data_cpmc_u["chol"] = chol
+ham_data_cpmc_u["h1"] = h1.copy()
+ham_data_cpmc_u["chol"] = chol.copy()
 ham_data_cpmc_u["u"] = 4.0
 ham_data_cpmc_u["ene0"] = 0.0
-ham_data_cpmc_u = ham_handler.build_propagation_intermediates(
-    ham_data_cpmc_u, prop_handler_cpmc_u, trial_cpmc_u, wave_data_u
-)
 ham_data_cpmc_u = ham_handler.build_measurement_intermediates(
     ham_data_cpmc_u, trial_cpmc_u, wave_data_u
+)
+ham_data_cpmc_u = ham_handler.build_propagation_intermediates(
+    ham_data_cpmc_u, prop_handler_cpmc_u, trial_cpmc_u, wave_data_u
 )
 
 prop_data_cpmc_u = prop_handler_cpmc_u.init_prop_data(
@@ -169,14 +178,14 @@ prop_handler_cpmc_g = propagation.propagator_cpmc(
 ham_data_cpmc_g = {}
 ham_data_cpmc_g["h0"] = h0
 ham_data_cpmc_g["h1"] = jsp.linalg.block_diag(*h1)
-ham_data_cpmc_g["chol"] = chol_g
+ham_data_cpmc_g["chol"] = chol_g.copy()
 ham_data_cpmc_g["u"] = 4.0
 ham_data_cpmc_g["ene0"] = 0.0
-ham_data_cpmc_g = ham_handler.build_propagation_intermediates(
-    ham_data_cpmc_g, prop_handler_cpmc_g, trial_cpmc_g, wave_data_g
-)
 ham_data_cpmc_g = ham_handler.build_measurement_intermediates(
     ham_data_cpmc_g, trial_cpmc_g, wave_data_g
+)
+ham_data_cpmc_g = ham_handler.build_propagation_intermediates(
+    ham_data_cpmc_g, prop_handler_cpmc_g, trial_cpmc_g, wave_data_g
 )
 
 prop_data_cpmc_g = prop_handler_cpmc_g.init_prop_data(
@@ -194,16 +203,16 @@ prop_handler_cpmc_nn_u = propagation.propagator_cpmc_nn(n_walkers=n_walkers, nei
 
 ham_data_cpmc_nn_u = {}
 ham_data_cpmc_nn_u["h0"] = h0
-ham_data_cpmc_nn_u["h1"] = h1
-ham_data_cpmc_nn_u["chol"] = chol
+ham_data_cpmc_nn_u["h1"] = h1.copy()
+ham_data_cpmc_nn_u["chol"] = chol.copy()
 ham_data_cpmc_nn_u["u"] = 4.0
 ham_data_cpmc_nn_u["u_1"] = 1.0
 ham_data_cpmc_nn_u["ene0"] = 0.0
-ham_data_cpmc_nn_u = ham_handler.build_propagation_intermediates(
-    ham_data_cpmc_nn_u, prop_handler_cpmc_nn_u, trial_cpmc_u, wave_data_u
-)
 ham_data_cpmc_nn_u = ham_handler.build_measurement_intermediates(
     ham_data_cpmc_nn_u, trial_cpmc_u, wave_data_u
+)
+ham_data_cpmc_nn_u = ham_handler.build_propagation_intermediates(
+    ham_data_cpmc_nn_u, prop_handler_cpmc_nn_u, trial_cpmc_u, wave_data_u
 )
 
 prop_data_cpmc_nn_u = prop_handler_cpmc_nn_u.init_prop_data(
@@ -295,8 +304,6 @@ def test_apply_trotprop_g():
     walkers_g[:, norb:, nelec_sp[0]:] = walkers_u.data[1]
     walkers_g = GHFWalkers(jnp.array(walkers_g))
     
-    np.testing.assert_allclose(ham_data_g['exp_h1'], sp.linalg.block_diag(*ham_data_u['exp_h1']))
-
     walkers_new = prop_handler_g._apply_trotprop(
         walkers_g, fields, ham_data_g
     )
@@ -305,7 +312,6 @@ def test_apply_trotprop_g():
     )
 
     for iw in range(n_walkers):
-        print(iw)
         np.testing.assert_allclose(
             walkers_new.data[iw],
             jsp.linalg.block_diag(
@@ -313,37 +319,175 @@ def test_apply_trotprop_g():
             )
         )
 
-def test_propagate_cpmc():
-    trial_cpmc_u = wavefunctions.uhf_cpmc(norb, nelec_sp)
-    ham_data_u["u"] = 4.0
-    prop_data_cpmc = prop_handler_cpmc.init_prop_data(
-        trial_cpmc_u, wave_data_u, ham_data_u, seed
+
+def test_propagate_g():
+    prop_data_new = prop_handler_g.propagate_constrained(
+        trial_g, ham_data_g, prop_data_g, fields, wave_data_g
     )
-    prop_data_new = prop_handler_cpmc.propagate_constrained(
-        trial_cpmc_u, ham_data_u, prop_data_cpmc, fields, wave_data_u
+    prop_data_new_ref = prop_handler_u.propagate_constrained(
+        trial_u, ham_data_u, prop_data_u, fields, wave_data_u
     )
-    assert (
-        prop_data_new["walkers"].data[0].shape == prop_data_u["walkers"].data[0].shape
+
+    np.testing.assert_allclose(
+        prop_data_new["overlaps"], 
+        prop_data_new_ref["overlaps"]
     )
-    assert (
-        prop_data_new["walkers"].data[1].shape == prop_data_u["walkers"].data[1].shape
+    np.testing.assert_allclose(
+        prop_data_new["weights"], 
+        prop_data_new_ref["weights"]
     )
-    assert prop_data_new["weights"].shape == prop_data_u["weights"].shape
-    assert prop_data_new["overlaps"].shape == prop_data_u["overlaps"].shape
+    np.testing.assert_allclose(
+        prop_data_new["walkers"].data[:, :norb, :nelec_sp[0]], 
+        prop_data_new_ref["walkers"].data[0]
+    )
+    np.testing.assert_allclose(
+        prop_data_new["walkers"].data[:, norb:, nelec_sp[0]:], 
+        prop_data_new_ref["walkers"].data[1]
+    )
+    np.testing.assert_allclose(
+        prop_data_new["pop_control_ene_shift"], 
+        prop_data_new_ref["pop_control_ene_shift"]
+    )
+
+# -----------------------------------------------------------------------------
+# UHF-CPMC tests.
+def test_propagate_cpmc_u():
+    prop_handler_cpmc_slow = propagation.propagator_cpmc_slow(n_walkers=n_walkers)
+    prop_data_new = prop_handler_cpmc_u.propagate_constrained(
+        trial_cpmc_u, ham_data_cpmc_u, prop_data_cpmc_u, fields, wave_data_u
+    )
     prop_data_new_slow = prop_handler_cpmc_slow.propagate_constrained(
-        trial_cpmc_u, ham_data_u, prop_data_cpmc, fields, wave_data_u
+        trial_cpmc_u, ham_data_cpmc_u, prop_data_cpmc_u, fields, wave_data_u
     )
-    assert np.allclose(
-        prop_data_new_slow["walkers"].data[0], prop_data_new["walkers"].data[0]
+    greens_new_slow = trial_cpmc_u.calc_green_full(
+        prop_data_new_slow["walkers"].data, wave_data_u
     )
-    assert np.allclose(
-        prop_data_new_slow["walkers"].data[1], prop_data_new["walkers"].data[1]
+
+    np.testing.assert_allclose(
+        prop_data_new["overlaps"],
+        prop_data_new_slow["overlaps"]
     )
-    assert np.allclose(prop_data_new_slow["weights"], prop_data_new["weights"])
-    assert np.allclose(prop_data_new_slow["overlaps"], prop_data_new["overlaps"])
+    np.testing.assert_allclose(
+        prop_data_new["weights"],
+        prop_data_new_slow["weights"]
+    )
+    np.testing.assert_allclose(
+        prop_data_new["walkers"].data[0],
+        prop_data_new_slow["walkers"].data[0]
+    )
+    np.testing.assert_allclose(
+        prop_data_new["walkers"].data[1],
+        prop_data_new_slow["walkers"].data[1]
+    )
+    np.testing.assert_allclose(
+        prop_data_new["greens"],
+        greens_new_slow
+    )
+    np.testing.assert_allclose(
+        prop_data_new["pop_control_ene_shift"],
+        prop_data_new_slow["pop_control_ene_shift"]
+    )
 
 
-def test_propagate_cpmc_nn():
+# -----------------------------------------------------------------------------
+# GHF-CPMC tests.
+def test_apply_trotprop_cpmc_g():
+    walkers_u = prop_data_cpmc_u["walkers"]
+    walkers_g = np.zeros((n_walkers, 2*norb, nocc), dtype=np.complex128)
+    walkers_g[:, :norb, :nelec_sp[0]] = walkers_u.data[0]
+    walkers_g[:, norb:, nelec_sp[0]:] = walkers_u.data[1]
+    walkers_g = GHFWalkers(jnp.array(walkers_g))
+    
+    walkers_new = prop_handler_cpmc_g._apply_trotprop(
+        walkers_g, fields, ham_data_cpmc_g
+    )
+    walkers_new_ref = prop_handler_cpmc_u._apply_trotprop(
+        walkers_u, fields, ham_data_cpmc_u
+    )
+
+    for iw in range(n_walkers):
+        np.testing.assert_allclose(
+            walkers_new.data[iw], 
+            jsp.linalg.block_diag(
+                walkers_new_ref.data[0][iw], 
+                walkers_new_ref.data[1][iw]
+            )
+        )
+
+
+def test_propagate_cpmc_one_body_g():
+    prop_data_new = prop_handler_cpmc_g.propagate_one_body(
+        trial_cpmc_g, ham_data_cpmc_g, prop_data_cpmc_g, wave_data_g
+    )
+    prop_data_new_ref = prop_handler_cpmc_u.propagate_one_body(
+        trial_cpmc_u, ham_data_cpmc_u, prop_data_cpmc_u, wave_data_u
+    )
+
+    np.testing.assert_allclose(
+        prop_data_new["overlaps"], 
+        prop_data_new_ref["overlaps"]
+    )
+    np.testing.assert_allclose(
+        prop_data_new["weights"], 
+        prop_data_new_ref["weights"]
+    )
+    np.testing.assert_allclose(
+        prop_data_new["walkers"].data[:, :norb, :nelec_sp[0]], 
+        prop_data_new_ref["walkers"].data[0]
+    )
+    np.testing.assert_allclose(
+        prop_data_new["walkers"].data[:, norb:, nelec_sp[0]:], 
+        prop_data_new_ref["walkers"].data[1]
+    )
+    np.testing.assert_allclose(
+        prop_data_new["pop_control_ene_shift"], 
+        prop_data_new_ref["pop_control_ene_shift"]
+    )
+
+    for iw in range(n_walkers):
+        np.testing.assert_allclose(
+            prop_data_new["greens"][iw], 
+            sp.linalg.block_diag(*prop_data_new_ref["greens"][iw])
+        )
+
+
+def test_propagate_cpmc_g():
+    prop_data_new = prop_handler_cpmc_g.propagate_constrained(
+        trial_cpmc_g, ham_data_cpmc_g, prop_data_cpmc_g, fields, wave_data_g
+    )
+    prop_data_new_ref = prop_handler_cpmc_u.propagate_constrained(
+        trial_cpmc_u, ham_data_cpmc_u, prop_data_cpmc_u, fields, wave_data_u
+    )
+
+    np.testing.assert_allclose(
+        prop_data_new["overlaps"],
+        prop_data_new_ref["overlaps"]
+    )
+    np.testing.assert_allclose(
+        prop_data_new["weights"],
+        prop_data_new_ref["weights"]
+    )
+    np.testing.assert_allclose(
+        prop_data_new["walkers"].data[:, :norb, :nelec_sp[0]],
+        prop_data_new_ref["walkers"].data[0]
+    )
+    np.testing.assert_allclose(
+        prop_data_new["walkers"].data[:, norb:, nelec_sp[0]:],
+        prop_data_new_ref["walkers"].data[1]
+    )
+    np.testing.assert_allclose(
+        prop_data_new["pop_control_ene_shift"],
+        prop_data_new_ref["pop_control_ene_shift"]
+    )
+
+    for iw in range(n_walkers):
+        np.testing.assert_allclose(
+            prop_data_new["greens"][iw], 
+            sp.linalg.block_diag(*prop_data_new_ref["greens"][iw])
+        )
+
+
+def test_propagate_cpmc_nn_u():
     trial_cpmc_u = wavefunctions.uhf_cpmc(norb, nelec_sp)
     ham_data_u["u"] = 4.0
     ham_data_u["u_1"] = 1.0
@@ -377,14 +521,19 @@ def test_propagate_cpmc_nn():
 
 
 if __name__ == "__main__":
-    #test_stochastic_reconfiguration_local()
-    #test_propagate()
+    test_stochastic_reconfiguration_local()
+    test_propagate()
 
-    #test_stochastic_reconfiguration_local_u()
-    #test_propagate_u()
-    #test_propagate_free_u()
+    test_stochastic_reconfiguration_local_u()
+    test_propagate_u()
+    test_propagate_free_u()
     
     test_apply_trotprop_g()
+    test_propagate_g()
 
-    #test_propagate_cpmc()
-    #test_propagate_cpmc_nn()
+    test_propagate_cpmc_u()
+    test_apply_trotprop_cpmc_g()
+    test_propagate_cpmc_one_body_g()
+    test_propagate_cpmc_g()
+
+    #test_propagate_cpmc_nn_u()

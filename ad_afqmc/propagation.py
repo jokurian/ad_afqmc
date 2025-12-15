@@ -572,7 +572,6 @@ class propagator_cpmc(propagator_afqmc):
                 jnp.array([[0, x], [1, x]]),
                 prop_data["hs_constant"][1] - 1,
             )
-
             ratio_1 = jnp.where(ratio_1 < 1.0e-8, 0.0, ratio_1)
             carry["node_crossings"] += jnp.sum(jnp.array(ratio_1) == 0.0)
 
@@ -606,7 +605,7 @@ class propagator_cpmc(propagator_afqmc):
                 )
                 # Down spins.
                 new_walkers = (
-                    carry["walkers"].data.at[:, trial.norb+x, :].mul(constants[:, 1].reshape(-1, 1))
+                    new_walkers.at[:, trial.norb+x, :].mul(constants[:, 1].reshape(-1, 1))
                 )
                 carry["walkers"].data = new_walkers
             ratios = jnp.where(mask, ratio_0, ratio_1)
@@ -625,7 +624,6 @@ class propagator_cpmc(propagator_afqmc):
 
         # one body
         prop_data = self.propagate_one_body(trial, ham_data, prop_data, wave_data)
-
         prop_data["weights"] *= jnp.exp(self.dt * (prop_data["pop_control_ene_shift"]))
         prop_data["weights"] = jnp.where(
             prop_data["weights"] > 100.0, 0.0, prop_data["weights"]
