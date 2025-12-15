@@ -749,8 +749,12 @@ def setup_afqmc(
     """
     directory = tmp_dir if tmp_dir is not None else tmpdir
 
-    h0, h1, chol, norb, nelec_sp = read_fcidump(directory)
+    h0, h1, chol, nbasis, nelec_sp = read_fcidump(directory)
     options = read_options(options, directory)
+    if options["walker_type"] == "generalized":
+        norb = nbasis // 2
+    else:
+        norb = nbasis
     observable = read_observable(norb, options, directory)
     ham, ham_data = set_ham(norb, h0, h1, chol, options["ene0"])
     ham_data = apply_symmetry_mask(ham_data, options)

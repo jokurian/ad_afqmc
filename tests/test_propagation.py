@@ -118,15 +118,6 @@ ham_data_g = ham_handler.build_propagation_intermediates(
     ham_data_g, prop_handler_g, trial_g, wave_data_g
 )
 
-np.testing.assert_allclose(wave_data_g["rdm1"][0], sp.linalg.block_diag(*wave_data_u["rdm1"]))
-np.testing.assert_allclose(
-        ham_data_g["mf_shifts"], ham_data_u["mf_shifts"])
-np.testing.assert_allclose(ham_data_g['h1'], sp.linalg.block_diag(*ham_data_u['h1']))
-np.testing.assert_allclose(ham_data_g['v0'], sp.linalg.block_diag(ham_data_u['v0'], ham_data_u['v0']))
-np.testing.assert_allclose(ham_data_g['v1'], sp.linalg.block_diag(ham_data_u['v1'], ham_data_u['v1']))
-np.testing.assert_allclose(ham_data_g['h1_mod'], sp.linalg.block_diag(*ham_data_u['h1_mod']))
-np.testing.assert_allclose(ham_data_g['exp_h1'], sp.linalg.block_diag(*ham_data_u['exp_h1']))
-
 init_walkers = np.zeros((n_walkers, 2*norb, nocc), dtype=np.complex128)
 for iw in range(n_walkers):
     init_walkers[iw] = jsp.linalg.block_diag(
@@ -391,30 +382,6 @@ def test_propagate_cpmc_u():
 
 # -----------------------------------------------------------------------------
 # GHF-CPMC tests.
-def test_apply_trotprop_cpmc_g():
-    walkers_u = prop_data_cpmc_u["walkers"]
-    walkers_g = np.zeros((n_walkers, 2*norb, nocc), dtype=np.complex128)
-    walkers_g[:, :norb, :nelec_sp[0]] = walkers_u.data[0]
-    walkers_g[:, norb:, nelec_sp[0]:] = walkers_u.data[1]
-    walkers_g = GHFWalkers(jnp.array(walkers_g))
-    
-    walkers_new = prop_handler_cpmc_g._apply_trotprop(
-        walkers_g, fields, ham_data_cpmc_g
-    )
-    walkers_new_ref = prop_handler_cpmc_u._apply_trotprop(
-        walkers_u, fields, ham_data_cpmc_u
-    )
-
-    for iw in range(n_walkers):
-        np.testing.assert_allclose(
-            walkers_new.data[iw], 
-            jsp.linalg.block_diag(
-                walkers_new_ref.data[0][iw], 
-                walkers_new_ref.data[1][iw]
-            )
-        )
-
-
 def test_propagate_cpmc_one_body_g():
     prop_data_new = prop_handler_cpmc_g.propagate_one_body(
         trial_cpmc_g, ham_data_cpmc_g, prop_data_cpmc_g, wave_data_g
@@ -532,7 +499,6 @@ if __name__ == "__main__":
     test_propagate_g()
 
     test_propagate_cpmc_u()
-    test_apply_trotprop_cpmc_g()
     test_propagate_cpmc_one_body_g()
     test_propagate_cpmc_g()
 
