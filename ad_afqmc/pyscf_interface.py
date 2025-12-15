@@ -7,7 +7,7 @@ import h5py
 import jax.numpy as jnp
 import numpy as np
 import scipy
-from pyscf import __config__, ao2mo, df, dft, lib, mcscf, scf
+from pyscf import __config__, ao2mo, df, dft, lib, mcscf, scf, fci
 from pyscf.cc.ccsd import CCSD
 from pyscf.cc.uccsd import UCCSD
 
@@ -701,6 +701,79 @@ def get_excitations(
     ref_det = np.array([d0a, d0b])
     return Acre, Ades, Bcre, Bdes, coeff, ref_det
 
+def get_full_casci_state(casci, ndet=None, tol=1e-4, root=0, verbose=False):
+    mol = casci.mol
+    nbsf = casci.mo_coeff.shape[0]
+    ncore = casci.ncore
+    ncas = casci.ncas
+    nextern = nbsf - ncore - ncas
+    nelecas = casci.nelecas
+    
+    # Dummy FCI object for `get_fci_state`.
+    ci = fci.FCI(mol)
+    ci.ci = casci.ci
+    #if isinstance(casci.ci, list): ci.ci = casci.ci[root]
+    ci.norb = ncas
+    ci.nelec = nelecas
+    casci_state = get_fci_state(ci, ndets=ndet, tol=tol, root=root)
+
+    if verbose: 
+        print(f'\n# Note that determinant coefficients may be unnormalized!\n')
+
+    full_state = {}
+
+    for det in casci_state:
+        nocc_a = ncore*(1,) + det[0] + nextern*(0,)
+        nocc_b = ncore*(1,) + det[1] + nextern*(0,)
+        coeff = casci_state[det]
+        if verbose: print(f'# {det} --> {nocc_a}, {nocc_b} : {coeff}')
+        full_state[(nocc_a, nocc_b)] = coeff
+    
+    return full_state
+
+def get_msd_trial_from_casci(
+    casci, _wave_data, casci_state=None, ndet=None, tol=1e-4, root=0, 
+    update=False, verbose=False
+):
+    # Create MSD state.
+    mo_coeff = casci.mo_coeff
+
+    if casci_state is None: 
+        casci_state = get_full_casci_state(
+            casci, ndet=ndet, tol=tol, root=root, verbose=verbose
+        )
+
+    else: ndet = len(casci_state)
+    wave_data_arr = []
+    coeffs = []
+
+    for det in casci_state:
+        nocc_a, nocc_b = np.array(det)
+        wave_data_i = _wave_data.copy()
+        wave_data_i['mo_coeff'] = [mo_coeff[:, nocc_a>0], mo_coeff[:, nocc_b>0]]
+        del wave_data_i['rdm1']
+        wave_data_arr.append(wave_data_i)
+        coeffs.append(casci_state[det])
+
+    wave_data = _wave_data.copy()
+    for i in range(ndet): wave_data[f'{i}'] = wave_data_arr[i]
+
+    # Check if coeffs are normalized.
+    coeffs = np.array(coeffs)
+    norm = np.sqrt(np.sum(coeffs**2))
+    try: np.testing.assert_allclose(norm, 1.)
+    except: coeffs /= norm
+    wave_data['coeffs'] = np.array(coeffs)
+
+    # Used to initialize initial walkers.
+    if update:
+        mo_coeff = wave_data['0']['mo_coeff'].copy()
+        rdm1 = [mo_coeff[0] @ mo_coeff[0].T.conj(), mo_coeff[1] @ mo_coeff[1].T.conj()]
+        wave_data['mo_coeff'] = mo_coeff
+        wave_data['rdm1'] = rdm1
+
+    if verbose: print(wave_data['coeffs'])
+    return wave_data
 
 # reading dets from dice
 def read_dets(
@@ -874,17 +947,33 @@ def compute_cholesky_integrals(mol, mf, basis_coeff, integrals, norb_frozen, cho
         eri = integrals["h2"]
         nelec = mol.nelec
         nbasis = h1e.shape[-1]
-        norb = nbasis
+        if isinstance(mf, scf.ghf.GHF):
+            norb = nbasis // 2
+        else:
+            norb = nbasis
         eri = ao2mo.restore(4, eri, norb)
         chol0 = modified_cholesky(eri, chol_cut)
         nchol = chol0.shape[0]
-        chol = np.zeros((nchol, norb, norb))
-        for i in range(nchol):
-            for m in range(norb):
-                for n in range(m + 1):
-                    triind = m * (m + 1) // 2 + n
-                    chol[i, m, n] = chol0[i, triind]
-                    chol[i, n, m] = chol0[i, triind]
+
+        if isinstance(mf, scf.ghf.GHF):
+            chol = np.zeros((nchol, 2*norb, 2*norb))
+            for i in range(nchol):
+                chol_i = np.zeros((norb, norb))
+                for m in range(norb):
+                    for n in range(m + 1):
+                        triind = m * (m + 1) // 2 + n
+                        chol_i[m, n] = chol0[i, triind]
+                        chol_i[n, m] = chol0[i, triind]
+                chol[i] = scipy.linalg.block_diag(chol_i, chol_i)
+
+        else:
+            chol = np.zeros((nchol, norb, norb))
+            for i in range(nchol):
+                for m in range(norb):
+                    for n in range(m + 1):
+                        triind = m * (m + 1) // 2 + n
+                        chol[i, m, n] = chol0[i, triind]
+                        chol[i, n, m] = chol0[i, triind]
 
         # basis transformation
         h1e = basis_coeff.T @ h1e @ basis_coeff
@@ -922,22 +1011,28 @@ def compute_cholesky_integrals(mol, mf, basis_coeff, integrals, norb_frozen, cho
 
 def write_trial(mol, mf, basis_coeff, nbasis, norb_frozen, tmpdir):
     assert basis_coeff.dtype == "float", "Only implemented for real-valued MOs"
-    trial_coeffs = np.empty((2, nbasis, nbasis))
     overlap = mf.get_ovlp(mol)
+    trial_coeffs = np.empty((2, nbasis, nbasis))
     if isinstance(mf, (scf.rohf.ROHF, scf.rhf.RHF)):
         uhfCoeffs = construct_uhf_coeffs_from_rhf(
             basis_coeff, mf.mo_coeff, overlap, norb_frozen, nbasis
         )
+        trial_coeffs[0] = uhfCoeffs[:, :nbasis]
+        trial_coeffs[1] = uhfCoeffs[:, nbasis:]
     elif isinstance(mf, scf.uhf.UHF):
         uhfCoeffs = construct_uhf_coeffs_from_uhf(
             basis_coeff, mf.mo_coeff, overlap, norb_frozen, nbasis
         )
+        trial_coeffs[0] = uhfCoeffs[:, :nbasis]
+        trial_coeffs[1] = uhfCoeffs[:, nbasis:]
+    elif isinstance(mf, scf.ghf.GHF):
+        ghfCoeffs = construct_ghf_coeffs_from_ghf(
+            basis_coeff, mf.mo_coeff, overlap, norb_frozen, nbasis
+        )
+        trial_coeffs = ghfCoeffs
     else:
         print("Cannot recognize type for mf object in write_trial")
         exit(1)
-
-    trial_coeffs[0] = uhfCoeffs[:, :nbasis]
-    trial_coeffs[1] = uhfCoeffs[:, nbasis:]
 
     np.savez(tmpdir + "/mo_coeff.npz", mo_coeff=trial_coeffs)
 
@@ -981,6 +1076,21 @@ def construct_uhf_coeffs_from_rhf(basis_coeff, mo_coeff, overlap, norb_frozen, n
     uhfCoeffs[:, nbasis:] = q
 
     return uhfCoeffs
+
+
+def construct_ghf_coeffs_from_ghf(basis_coeff, mo_coeff, overlap, norb_frozen, nbasis):
+    # Constructs GHF orbital coefficients relative to the
+    # spinless basis
+    ghfCoeffs = np.empty((2*nbasis, 2*nbasis))
+
+    q, r = np.linalg.qr(
+        basis_coeff[:, norb_frozen:].T.dot(overlap).dot(mo_coeff[:, norb_frozen:])
+    )
+    sgn = np.sign(r.diagonal())
+    q = np.einsum("ij,j->ij", q, sgn)
+    ghfCoeffs = q
+
+    return ghfCoeffs
 
 
 def prep_afqmc_ghf_complex(mol, gmf: scf.ghf.GHF, tmpdir, chol_cut=1e-5):

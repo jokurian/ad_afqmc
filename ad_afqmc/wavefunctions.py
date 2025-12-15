@@ -1889,7 +1889,7 @@ class ghf(wave_function):
         return jnp.linalg.det(wave_data["mo_coeff"].T.conj() @ walker)
 
     @partial(jit, static_argnums=0)
-    def _calc_green(
+    def _calc_green_unrestricted(
         self, walker_up: jax.Array, walker_dn: jax.Array, wave_data: dict
     ) -> jax.Array:
         overlap_mat = jnp.hstack(
@@ -1907,6 +1907,15 @@ class ghf(wave_function):
         return green
 
     @partial(jit, static_argnums=0)
+    def _calc_green_generalized(
+        self, walker: jax.Array, wave_data: dict
+    ) -> jax.Array:
+        overlap_mat = wave_data["mo_coeff"].T.conj() @ walker
+        inv = jnp.linalg.inv(overlap_mat)
+        green = (walker @ inv).T
+        return green
+
+    @partial(jit, static_argnums=0)
     def _calc_force_bias_unrestricted(
         self,
         walker_up: jax.Array,
@@ -1914,7 +1923,7 @@ class ghf(wave_function):
         ham_data: dict,
         wave_data: dict,
     ) -> jax.Array:
-        green_walker = self._calc_green(walker_up, walker_dn, wave_data)
+        green_walker = self._calc_green_unrestricted(walker_up, walker_dn, wave_data)
         fb = jnp.einsum(
             "gij,ij->g", ham_data["rot_chol"], green_walker, optimize="optimal"
         )
@@ -1924,7 +1933,7 @@ class ghf(wave_function):
     def _calc_force_bias_generalized(
         self, walker: Sequence, ham_data: dict, wave_data: dict
     ) -> jax.Array:
-        green_walker = self._calc_green(walker, wave_data)
+        green_walker = self._calc_green_generalized(walker, wave_data)
         fb = jnp.einsum(
             "gij,ij->g", ham_data["rot_chol"], green_walker, optimize="optimal"
         )
@@ -1940,7 +1949,7 @@ class ghf(wave_function):
     ) -> jax.Array:
         h0, rot_h1, rot_chol = ham_data["h0"], ham_data["rot_h1"], ham_data["rot_chol"]
         ene0 = h0
-        green_walker = self._calc_green(walker_up, walker_dn, wave_data)
+        green_walker = self._calc_green_unrestricted(walker_up, walker_dn, wave_data)
         ene1 = jnp.sum(green_walker * rot_h1)
         f = jnp.einsum("gij,jk->gik", rot_chol, green_walker.T, optimize="optimal")
         coul = vmap(jnp.trace)(f)
@@ -1954,7 +1963,7 @@ class ghf(wave_function):
     ) -> jax.Array:
         h0, rot_h1, rot_chol = ham_data["h0"], ham_data["rot_h1"], ham_data["rot_chol"]
         ene0 = h0
-        green_walker = self._calc_green(walker, wave_data)
+        green_walker = self._calc_green_generalized(walker, wave_data)
 
         # <ghf|H_1|w><ghf|w> = Tr(green_walker.T . rot_h1)
         ene1 = jnp.sum(green_walker * rot_h1)
@@ -1997,27 +2006,35 @@ class ghf(wave_function):
 
     @partial(jit, static_argnums=0)
     def _build_measurement_intermediates(self, ham_data: dict, wave_data: dict) -> dict:
-        ham_data["h1"] = (
-            ham_data["h1"].at[0].set((ham_data["h1"][0] + ham_data["h1"][0].T) / 2.0)
-        )
-        ham_data["h1"] = (
-            ham_data["h1"].at[1].set((ham_data["h1"][1] + ham_data["h1"][1].T) / 2.0)
-        )
-        ham_data["rot_h1"] = wave_data["mo_coeff"].T.conj() @ jnp.block(
-            [
-                [ham_data["h1"][0], jnp.zeros_like(ham_data["h1"][1])],
-                [jnp.zeros_like(ham_data["h1"][0]), ham_data["h1"][1]],
-            ]
-        )
-        ham_data["rot_chol"] = vmap(
-            lambda x: jnp.hstack(
+        if ham_data["h1"].ndim == 3: # RHF/UHF-walkers.
+            ham_data["h1"] = (
+                ham_data["h1"].at[0].set((ham_data["h1"][0] + ham_data["h1"][0].T) / 2.0)
+            )
+            ham_data["h1"] = (
+                ham_data["h1"].at[1].set((ham_data["h1"][1] + ham_data["h1"][1].T) / 2.0)
+            )
+            ham_data["rot_h1"] = wave_data["mo_coeff"].T.conj() @ jnp.block(
                 [
-                    wave_data["mo_coeff"].T.conj()[:, : self.norb] @ x,
-                    wave_data["mo_coeff"].T.conj()[:, self.norb :] @ x,
+                    [ham_data["h1"][0], jnp.zeros_like(ham_data["h1"][1])],
+                    [jnp.zeros_like(ham_data["h1"][0]), ham_data["h1"][1]],
                 ]
-            ),
-            in_axes=(0),
-        )(ham_data["chol"].reshape(-1, self.norb, self.norb))
+            )
+            ham_data["rot_chol"] = vmap(
+                lambda x: jnp.hstack(
+                    [
+                        wave_data["mo_coeff"].T.conj()[:, : self.norb] @ x,
+                        wave_data["mo_coeff"].T.conj()[:, self.norb :] @ x,
+                    ]
+                ),
+                in_axes=(0),
+            )(ham_data["chol"].reshape(-1, self.norb, self.norb))
+        else: # GHF-walkers.
+            ham_data["h1"] = (ham_data["h1"] + ham_data["h1"].T) / 2.0
+            ham_data["rot_h1"] = wave_data["mo_coeff"].T.conj() @ ham_data["h1"]
+            ham_data["rot_chol"] = vmap(
+                lambda x: wave_data["mo_coeff"].T.conj() @ x,
+                in_axes=(0),
+            )(ham_data["chol"].reshape(-1, 2*self.norb, 2*self.norb))
         return ham_data
 
     def __hash__(self) -> int:
@@ -2165,9 +2182,7 @@ class ghf_cpmc(ghf, wave_function_cpmc):
         green = self._calc_green_full_generalized(walker, wave_data)
         u = ham_data["u"]
         h1 = ham_data["h1"]
-        energy_1 = jnp.sum(green[: self.norb, : self.norb] * h1[0]) + jnp.sum(
-            green[self.norb :, self.norb :] * h1[1]
-        )
+        energy_1 = jnp.trace(green @ h1)
         energy_2 = u * (
             jnp.sum(
                 green[: self.norb, : self.norb].diagonal()
