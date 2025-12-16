@@ -186,5 +186,5 @@ def test_nh2():
 
 if __name__ =="__main__":
     test_h4()
-    #test_h2o()
-    #test_nh2()
+    test_h2o()
+    test_nh2()

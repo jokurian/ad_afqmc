@@ -143,7 +143,6 @@ class propagator_afqmc(propagator):
             energy_samples = jnp.real(
                 trial.calc_energy(prop_data["walkers"], ham_data, wave_data)
             )
-            print(type(prop_data["walkers"]))
             e_estimate = jnp.array(jnp.sum(energy_samples) / self.n_walkers)
             prop_data["e_estimate"] = e_estimate
         prop_data["pop_control_ene_shift"] = prop_data["e_estimate"]

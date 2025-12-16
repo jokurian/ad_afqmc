@@ -1,7 +1,5 @@
+import pytest
 from ad_afqmc import config
-config.afqmc_config['use_mpi'] = False
-config.setup_jax()
-comm = config.setup_comm()
 
 from ad_afqmc import (
     lattices,
@@ -27,6 +25,39 @@ chol_cut = 1e-8
 if not os.path.exists(tmpdir):
     os.makedirs(tmpdir)
 
+def make_env():
+    old_cfg = dict(config.afqmc_config)
+
+    config.afqmc_config["use_mpi"] = False
+    config.setup_jax()
+    comm = config.setup_comm()
+
+    return {
+        "comm": comm,
+        "old_cfg": old_cfg,
+    }
+
+def teardown_env(env):
+    config.afqmc_config.clear()
+    config.afqmc_config.update(env["old_cfg"])
+
+@pytest.fixture(scope="module")
+def env():
+    # Save old config so we can restore it
+    old_cfg = dict(config.afqmc_config)
+
+    config.afqmc_config['use_mpi'] = False
+    config.setup_jax()
+    comm = config.setup_comm()
+
+    yield {
+        "comm": comm,
+    }
+
+    # restore config after tests in this module
+    config.afqmc_config.clear()
+    config.afqmc_config.update(old_cfg)
+
 def random_orthogonal_real(n):
     rng = np.random.default_rng()
     A = rng.standard_normal((n, n))
@@ -47,7 +78,7 @@ options = {
 "walker_type": "",
 }
 
-def check_hf(mf, integrals, options):
+def check_hf(mf, integrals, options, comm):
     nmo = np.shape(mf.mo_coeff)[-1]
     n_elec = mf.mol.nelec
     nocc = sum(n_elec)
@@ -136,7 +167,12 @@ def check_hf(mf, integrals, options):
     
 
 # Hubbard
-def test_hubbard():
+def test_hubbard(env):
+    check_hubbard(env)
+
+def check_hubbard(env):
+    comm = env["comm"]
+
     U = 12.0
     nup, ndown = 8, 8
     n_elec = (nup, ndown)
@@ -178,8 +214,13 @@ def test_hubbard():
     ]
     mf.kernel(dm_init)
 
-    check_hf(mf, integrals, options)
+    check_hf(mf, integrals, options, comm)
 
 if __name__ == "__main__":
-    test_hubbard()
+    env = make_env()
 
+    try:
+        check_hubbard(env)
+    
+    finally:
+        teardown_env(env)

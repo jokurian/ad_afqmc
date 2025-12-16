@@ -1854,7 +1854,7 @@ class ghf_complex(wave_function):
                 in_axes=(0),
             )(ham_data["chol"].reshape(-1, self.norb, self.norb))
         else: # GHF-walkers.
-            ham_data["h1"] = (ham_data["h1"] + ham_data["h1"].T) / 2.0
+            ham_data["h1"] = (ham_data["h1"] + ham_data["h1"].T.conj()) / 2.0
             ham_data["rot_h1"] = wave_data["mo_coeff"].T.conj() @ ham_data["h1"]
             ham_data["rot_chol"] = vmap(
                 lambda x: wave_data["mo_coeff"].T.conj() @ x,
@@ -3427,9 +3427,9 @@ class gcisd_complex(wave_function_auto):
         nocc = self.nelec[0] + self.nelec[1]
         green = (walker.dot(jnp.linalg.inv(walker[:nocc, :]))).T
         green_occ = green[:, nocc:].copy()
-        greenp = jnp.vstack((green_occ, -jnp.eye(self.norb - nocc)))
+        greenp = jnp.vstack((green_occ, -jnp.eye(2*self.norb - nocc)))
 
-        chol = ham_data["chol"].reshape(-1, self.norb, self.norb)
+        chol = ham_data["chol"].reshape(-1, 2*self.norb, 2*self.norb)
         rot_chol = chol[:, :nocc, :]
 
         # Ref
