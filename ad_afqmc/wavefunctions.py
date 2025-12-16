@@ -681,9 +681,6 @@ class wave_function(ABC):
                 If generalized, a single jax.Array of shape (nwalkers, norb, nelec[0] + nelec[1]).
         """
         rdm1 = self.get_rdm1(wave_data)
-        natorbs_up = jnp.linalg.eigh(rdm1[0])[1][:, ::-1][:, : self.nelec[0]]
-        natorbs_dn = jnp.linalg.eigh(rdm1[1])[1][:, ::-1][:, : self.nelec[1]]
-
         if walker_type == "restricted":
             rdm1_avg = rdm1[0] + rdm1[1]
             natorbs = jnp.linalg.eigh(rdm1_avg)[1][:, ::-1]
@@ -691,6 +688,8 @@ class wave_function(ABC):
                 jnp.array([natorbs[:, : self.nelec[0]] + 0.0j] * n_walkers)
             )
         elif walker_type == "unrestricted":
+            natorbs_up = jnp.linalg.eigh(rdm1[0])[1][:, ::-1][:, : self.nelec[0]]
+            natorbs_dn = jnp.linalg.eigh(rdm1[1])[1][:, ::-1][:, : self.nelec[1]]
             return UHFWalkers(
                 [
                     jnp.array([natorbs_up + 0.0j] * n_walkers),
@@ -698,7 +697,7 @@ class wave_function(ABC):
                 ]
             )
         elif walker_type == "generalized":
-            natorbs = jnp.linalg.eigh(rdm1[0])[1][:, ::-1][
+            natorbs = jnp.linalg.eigh(rdm1)[1][:, ::-1][
                 :, : self.nelec[0] + self.nelec[1]
             ]
             return GHFWalkers(jnp.array([natorbs + 0.0j] * n_walkers))
@@ -1811,7 +1810,8 @@ class ghf_complex(wave_function):
         return ene2 + ene1 + ene0
 
     def _calc_rdm1(self, wave_data: dict) -> jax.Array:
-        rdm1 = jnp.array([wave_data["mo_coeff"] @ wave_data["mo_coeff"].T.conj()])
+        #rdm1 = jnp.array([wave_data["mo_coeff"] @ wave_data["mo_coeff"].T.conj()])
+        rdm1 = wave_data["mo_coeff"] @ wave_data["mo_coeff"].T.conj()
         return rdm1
 
     @partial(jit, static_argnums=0)
@@ -1823,14 +1823,43 @@ class ghf_complex(wave_function):
         # ham_data["h1"] = (
         #    ham_data["h1"].at[1].set((ham_data["h1"][1] + ham_data["h1"][1].T) / 2.0)
         # )
-        ham_data["rot_h1"] = wave_data["mo_coeff"].T.conj() @ (
-            (ham_data["h1"][0] + ham_data["h1"][1]) / 2.0
-        )
-        ham_data["rot_chol"] = jnp.einsum(
-            "pi,gij->gpj",
-            wave_data["mo_coeff"].T.conj(),
-            ham_data["chol"].reshape(-1, self.norb, self.norb),
-        )
+        #ham_data["rot_h1"] = wave_data["mo_coeff"].T.conj() @ (
+        #    (ham_data["h1"][0] + ham_data["h1"][1]) / 2.0
+        #)
+        #ham_data["rot_chol"] = jnp.einsum(
+        #    "pi,gij->gpj",
+        #    wave_data["mo_coeff"].T.conj(),
+        #    ham_data["chol"].reshape(-1, 2*self.norb, 2*self.norb),
+        #)
+        if ham_data["h1"].ndim == 3: # RHF/UHF-walkers.
+            ham_data["h1"] = (
+                ham_data["h1"].at[0].set((ham_data["h1"][0] + ham_data["h1"][0].T) / 2.0)
+            )
+            ham_data["h1"] = (
+                ham_data["h1"].at[1].set((ham_data["h1"][1] + ham_data["h1"][1].T) / 2.0)
+            )
+            ham_data["rot_h1"] = wave_data["mo_coeff"].T.conj() @ jnp.block(
+                [
+                    [ham_data["h1"][0], jnp.zeros_like(ham_data["h1"][1])],
+                    [jnp.zeros_like(ham_data["h1"][0]), ham_data["h1"][1]],
+                ]
+            )
+            ham_data["rot_chol"] = vmap(
+                lambda x: jnp.hstack(
+                    [
+                        wave_data["mo_coeff"].T.conj()[:, : self.norb] @ x,
+                        wave_data["mo_coeff"].T.conj()[:, self.norb :] @ x,
+                    ]
+                ),
+                in_axes=(0),
+            )(ham_data["chol"].reshape(-1, self.norb, self.norb))
+        else: # GHF-walkers.
+            ham_data["h1"] = (ham_data["h1"] + ham_data["h1"].T) / 2.0
+            ham_data["rot_h1"] = wave_data["mo_coeff"].T.conj() @ ham_data["h1"]
+            ham_data["rot_chol"] = vmap(
+                lambda x: wave_data["mo_coeff"].T.conj() @ x,
+                in_axes=(0),
+            )(ham_data["chol"].reshape(-1, 2*self.norb, 2*self.norb))
         return ham_data
 
     def __hash__(self) -> int:
@@ -3452,11 +3481,11 @@ class gcisd_complex(wave_function_auto):
         nocc = self.nelec[0] + self.nelec[1]
         green = (walker.dot(jnp.linalg.inv(walker[:nocc, :]))).T
         green_occ = green[:, nocc:].copy()
-        greenp = jnp.vstack((green_occ, -jnp.eye(self.norb - nocc)))
+        greenp = jnp.vstack((green_occ, -jnp.eye(2*self.norb - nocc)))
 
-        chol = ham_data["chol"].reshape(-1, self.norb, self.norb)
+        chol = ham_data["chol"].reshape(-1, 2*self.norb, 2*self.norb)
         rot_chol = chol[:, :nocc, :]
-        h1 = ham_data["h1"][0]
+        h1 = ham_data["h1"]
         rot_h1 = h1[:nocc, :]
 
         # 0 body energy

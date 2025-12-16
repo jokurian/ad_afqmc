@@ -383,7 +383,7 @@ class propagator_afqmc(propagator):
         rdm1 = wave_data["rdm1"]
         if self.walker_type == "generalized":
             nbasis *= 2
-            rdm1 = rdm1[0]
+            #rdm1 = rdm1[0]
         else:
             rdm1 = rdm1[0] + rdm1[1]
         ham_data["mf_shifts"] = 1.0j * vmap(

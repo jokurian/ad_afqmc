@@ -118,7 +118,7 @@ def check_hf(mf, integrals, options):
     )
     trial = wavefunctions.ghf_cpmc(n_ao, n_elec)
     wave_data["mo_coeff"] = gmf.mo_coeff[:, gmf.mo_occ>0]
-    wave_data["rdm1"] = [dm]
+    wave_data["rdm1"] = dm
     ham_data["u"] = integrals_g["u"]
     prop = propagation.propagator_cpmc(
         dt=options["dt"],

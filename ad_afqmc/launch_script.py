@@ -605,7 +605,7 @@ def set_trial(
             n_chunks=options["n_chunks"],
             projector=options["symmetry_projector"],
         )
-        wave_data["mo_coeff"] = mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]]
+        wave_data["mo_coeff"] = mo_coeff[:, : nelec_sp[0] + nelec_sp[1]]
 
     elif options_trial == "gcisd_complex":
         try:

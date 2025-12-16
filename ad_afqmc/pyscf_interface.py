@@ -1139,7 +1139,8 @@ def prep_afqmc_ghf_complex(mol, gmf: scf.ghf.GHF, tmpdir, chol_cut=1e-5):
     q, r = np.linalg.qr(mo_coeff.T.conj() @ ovlp @ mo_coeff)
     sgn = np.sign(r.diagonal())
     q = np.einsum("ij,j->ij", q, sgn)
-    np.savez(tmpdir + "/mo_coeff.npz", mo_coeff=[q, q])
+    #np.savez(tmpdir + "/mo_coeff.npz", mo_coeff=[q, q])
+    np.savez(tmpdir + "/mo_coeff.npz", mo_coeff=q)
 
     return h, h_mod, chol
 
