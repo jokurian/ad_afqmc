@@ -641,6 +641,33 @@ class propagator_cpmc_slow(propagator_cpmc):
     """CPMC propagator for the Hubbard model with on-site interactions."""
 
     @partial(jit, static_argnums=(0, 1))
+    def propagate_one_body(
+        self,
+        trial: wavefunctions.wave_function_cpmc,
+        ham_data: dict,
+        prop_data: dict,
+        wave_data: dict,
+    ) -> dict:
+        if self.walker_type == "unrestricted":
+            prop_data["walkers"].data[0] = jnp.einsum(
+                "ij,wjk->wik", ham_data["exp_h1"][0], prop_data["walkers"].data[0]
+            )
+            prop_data["walkers"].data[1] = jnp.einsum(
+                "ij,wjk->wik", ham_data["exp_h1"][1], prop_data["walkers"].data[1]
+            )
+        elif self.walker_type == "generalized":
+            prop_data["walkers"].data = jnp.einsum(
+                "ij,wjk->wik", ham_data["exp_h1"], prop_data["walkers"].data
+            )
+        overlaps_new = trial.calc_overlap(prop_data["walkers"], wave_data)
+        prop_data["weights"] *= (overlaps_new / prop_data["overlaps"]).real
+        prop_data["weights"] = jnp.where(
+            prop_data["weights"] < 1.0e-8, 0.0, prop_data["weights"]
+        )
+        prop_data["overlaps"] = overlaps_new
+        return prop_data
+
+    @partial(jit, static_argnums=(0, 1))
     def propagate_constrained(
         self,
         trial: wavefunctions.wave_function,
@@ -663,18 +690,7 @@ class propagator_cpmc_slow(propagator_cpmc):
             prop_data: dictionary containing the updated propagation data
         """
         # one body
-        prop_data["walkers"].data[0] = jnp.einsum(
-            "ij,wjk->wik", ham_data["exp_h1"][0], prop_data["walkers"].data[0]
-        )
-        prop_data["walkers"].data[1] = jnp.einsum(
-            "ij,wjk->wik", ham_data["exp_h1"][1], prop_data["walkers"].data[1]
-        )
-        overlaps_new = trial.calc_overlap(prop_data["walkers"], wave_data)
-        prop_data["weights"] *= (overlaps_new / prop_data["overlaps"]).real
-        prop_data["weights"] = jnp.where(
-            prop_data["weights"] < 1.0e-8, 0.0, prop_data["weights"]
-        )
-        prop_data["overlaps"] = overlaps_new
+        prop_data = self.propagate_one_body(trial, ham_data, prop_data, wave_data)
 
         # two body
         # TODO: define separate sampler that feeds uniform_rns instead of gaussian_rns
@@ -683,35 +699,71 @@ class propagator_cpmc_slow(propagator_cpmc):
         # iterate over sites
         # TODO: fast update
         def scanned_fun(carry, x):
-            # field 1
-            new_walkers_0_up = (
-                carry["walkers"].data[0].at[:, x, :].mul(prop_data["hs_constant"][0, 0])
-            )
-            new_walkers_0_dn = (
-                carry["walkers"].data[1].at[:, x, :].mul(prop_data["hs_constant"][0, 1])
-            )
-            overlaps_new_0 = trial.calc_overlap(
-                UHFWalkers([jnp.array(new_walkers_0_up), jnp.array(new_walkers_0_dn)]),
-                wave_data,
-            )
-            ratio_0 = (overlaps_new_0 / carry["overlaps"]).real / 2.0
-            ratio_0 = jnp.array(jnp.where(ratio_0 < 1.0e-8, 0.0, ratio_0))
-            carry["node_crossings"] += jnp.sum(jnp.array(ratio_0) == 0.0)
+            if self.walker_type == "unrestricted":
+                # field 1
+                new_walkers_0_up = (
+                    carry["walkers"].data[0].at[:, x, :].mul(prop_data["hs_constant"][0, 0])
+                )
+                new_walkers_0_dn = (
+                    carry["walkers"].data[1].at[:, x, :].mul(prop_data["hs_constant"][0, 1])
+                )
+                overlaps_new_0 = trial.calc_overlap(
+                    UHFWalkers([jnp.array(new_walkers_0_up), jnp.array(new_walkers_0_dn)]),
+                    wave_data,
+                )
+                ratio_0 = (overlaps_new_0 / carry["overlaps"]).real / 2.0
+                ratio_0 = jnp.array(jnp.where(ratio_0 < 1.0e-8, 0.0, ratio_0))
+                carry["node_crossings"] += jnp.sum(jnp.array(ratio_0) == 0.0)
 
-            # field 2
-            new_walkers_1_up = (
-                carry["walkers"].data[0].at[:, x, :].mul(prop_data["hs_constant"][1, 0])
-            )
-            new_walkers_1_dn = (
-                carry["walkers"].data[1].at[:, x, :].mul(prop_data["hs_constant"][1, 1])
-            )
-            overlaps_new_1 = trial.calc_overlap(
-                UHFWalkers([jnp.array(new_walkers_1_up), jnp.array(new_walkers_1_dn)]),
-                wave_data,
-            )
-            ratio_1 = (overlaps_new_1 / carry["overlaps"]).real / 2.0
-            ratio_1 = jnp.array(jnp.where(ratio_1 < 1.0e-8, 0.0, ratio_1))
-            carry["node_crossings"] += jnp.sum(jnp.array(ratio_1) == 0.0)
+                # field 2
+                new_walkers_1_up = (
+                    carry["walkers"].data[0].at[:, x, :].mul(prop_data["hs_constant"][1, 0])
+                )
+                new_walkers_1_dn = (
+                    carry["walkers"].data[1].at[:, x, :].mul(prop_data["hs_constant"][1, 1])
+                )
+                overlaps_new_1 = trial.calc_overlap(
+                    UHFWalkers([jnp.array(new_walkers_1_up), jnp.array(new_walkers_1_dn)]),
+                    wave_data,
+                )
+                ratio_1 = (overlaps_new_1 / carry["overlaps"]).real / 2.0
+                ratio_1 = jnp.array(jnp.where(ratio_1 < 1.0e-8, 0.0, ratio_1))
+                carry["node_crossings"] += jnp.sum(jnp.array(ratio_1) == 0.0)
+
+            elif self.walker_type == "generalized":
+                # field 1
+                # spin up
+                new_walkers_0 = (
+                    carry["walkers"].data.at[:, x, :].mul(prop_data["hs_constant"][0, 0])
+                )
+                # spin down
+                new_walkers_0 = (
+                    new_walkers_0.at[:, trial.norb+x, :].mul(prop_data["hs_constant"][0, 1])
+                )
+                overlaps_new_0 = trial.calc_overlap(
+                    GHFWalkers(jnp.array(new_walkers_0)),
+                    wave_data,
+                )
+                ratio_0 = (overlaps_new_0 / carry["overlaps"]).real / 2.0
+                ratio_0 = jnp.array(jnp.where(ratio_0 < 1.0e-8, 0.0, ratio_0))
+                carry["node_crossings"] += jnp.sum(jnp.array(ratio_0) == 0.0)
+
+                # field 2
+                # spin up
+                new_walkers_1 = (
+                    carry["walkers"].data.at[:, x, :].mul(prop_data["hs_constant"][1, 0])
+                )
+                # spin down
+                new_walkers_1 = (
+                    new_walkers_1.at[:, trial.norb+x, :].mul(prop_data["hs_constant"][1, 1])
+                )
+                overlaps_new_1 = trial.calc_overlap(
+                    GHFWalkers(jnp.array(new_walkers_1)),
+                    wave_data,
+                )
+                ratio_1 = (overlaps_new_1 / carry["overlaps"]).real / 2.0
+                ratio_1 = jnp.array(jnp.where(ratio_1 < 1.0e-8, 0.0, ratio_1))
+                carry["node_crossings"] += jnp.sum(jnp.array(ratio_1) == 0.0)
 
             # normalize
             norm = ratio_0 + ratio_1
@@ -720,9 +772,12 @@ class propagator_cpmc_slow(propagator_cpmc):
             # update
             rns = uniform_rns[:, x]
             mask_0 = (rns < ratio_0).reshape(-1, 1, 1)
-            new_walkers_up = jnp.where(mask_0, new_walkers_0_up, new_walkers_1_up)
-            new_walkers_dn = jnp.where(mask_0, new_walkers_0_dn, new_walkers_1_dn)
-            new_walkers = [new_walkers_up, new_walkers_dn]
+            if self.walker_type == "unrestricted":
+                new_walkers_up = jnp.where(mask_0, new_walkers_0_up, new_walkers_1_up)
+                new_walkers_dn = jnp.where(mask_0, new_walkers_0_dn, new_walkers_1_dn)
+                new_walkers = [new_walkers_up, new_walkers_dn]
+            elif self.walker_type == "generalized":
+                new_walkers = jnp.where(mask_0, new_walkers_0, new_walkers_1)
             mask_0 = mask_0.reshape(-1)
             overlaps_new = jnp.where(mask_0, overlaps_new_0, overlaps_new_1)
             carry["walkers"].data = new_walkers
@@ -733,19 +788,7 @@ class propagator_cpmc_slow(propagator_cpmc):
         prop_data, _ = lax.scan(scanned_fun, prop_data, jnp.arange(trial.norb))
 
         # one body
-        prop_data["walkers"].data[0] = jnp.einsum(
-            "ij,wjk->wik", ham_data["exp_h1"][0], prop_data["walkers"].data[0]
-        )
-        prop_data["walkers"].data[1] = jnp.einsum(
-            "ij,wjk->wik", ham_data["exp_h1"][1], prop_data["walkers"].data[1]
-        )
-        overlaps_new = trial.calc_overlap(prop_data["walkers"], wave_data)
-        prop_data["weights"] *= (overlaps_new / prop_data["overlaps"]).real
-        prop_data["weights"] = jnp.array(
-            jnp.where(prop_data["weights"] < 1.0e-8, 0.0, prop_data["weights"])
-        )
-        prop_data["overlaps"] = overlaps_new
-
+        prop_data = self.propagate_one_body(trial, ham_data, prop_data, wave_data)
         prop_data["weights"] *= jnp.exp(self.dt * (prop_data["pop_control_ene_shift"]))
         prop_data["weights"] = jnp.where(
             prop_data["weights"] > 100.0, 0.0, prop_data["weights"]

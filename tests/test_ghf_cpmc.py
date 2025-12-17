@@ -166,6 +166,94 @@ def check_hf(mf, integrals, options, comm):
     assert np.isclose(err1, err2, atol=1e-8), f"{err1} {err2}"
     
 
+def check_hf_slow(mf, integrals, options, comm):
+    nmo = np.shape(mf.mo_coeff)[-1]
+    n_elec = mf.mol.nelec
+    nocc = sum(n_elec)
+    hcore_ao = integrals["h1"]
+    n_ao = hcore_ao.shape[-1]
+    n_walkers = options["n_walkers"]
+
+    # RHF/UHF
+    if isinstance(mf, scf.rhf.RHF):
+        options["trial"] = "rhf"
+        options["walker_type"] = "restricted"
+    elif isinstance(mf, scf.uhf.UHF):
+        options["trial"] = "uhf"
+        options["walker_type"] = "unrestricted"
+    
+    pyscf_interface.prep_afqmc(
+        mf, basis_coeff=np.eye(n_ao), integrals=integrals, chol_cut=chol_cut, tmpdir=tmpdir
+    )
+    ham_data, ham, prop, trial, wave_data, sampler, observable, options = launch_script.setup_afqmc(
+        options, tmp_dir=tmpdir
+    )
+    trial = wavefunctions.uhf_cpmc(n_ao, n_elec)
+    wave_data["mo_coeff"] = [
+        mf.mo_coeff[0][:, :n_elec[0]], 
+        mf.mo_coeff[1][:, :n_elec[1]]
+    ]
+    wave_data["rdm1"] = mf.make_rdm1()
+    ham_data["u"] = integrals["u"]
+    prop = propagation.propagator_cpmc_slow(
+        dt=options["dt"],
+        n_walkers=options["n_walkers"],
+        walker_type=options["walker_type"]
+    )
+    init_walkers = UHFWalkers([
+        jnp.array([mf.mo_coeff[0][:, : n_elec[0]]] * n_walkers),
+        jnp.array([mf.mo_coeff[1][:, : n_elec[1]]] * n_walkers),
+    ])
+    ene1, err1 = driver.afqmc(
+        ham_data, ham, prop, trial, wave_data, sampler, observable, options, comm, tmpdir=tmpdir,
+        init_walkers=init_walkers
+    )
+    
+    # -------------------------------------------------------------------------
+    # RHF/UHF based GHF
+    options["trial"] = "ghf"
+    options["walker_type"] = "generalized"   
+    integrals_g = integrals.copy()
+    integrals_g["h1"] = la.block_diag(hcore_ao, hcore_ao)
+    
+    # Build GHF object.
+    gmf = scf.GHF(mf.mol)
+    gmf.get_hcore = lambda *args: integrals_g["h1"]
+    gmf.get_ovlp = lambda *args: np.eye(2*n_ao)
+    gmf._eri = ao2mo.restore(8, integrals["h2"], n_ao)
+    gmf.mo_coeff = np.zeros((2*n_ao, 2*n_ao))
+    gmf.mo_coeff[:n_ao, :n_ao] = mf.mo_coeff[0]
+    gmf.mo_coeff[n_ao:, n_ao:] = mf.mo_coeff[1]
+    gmf.mo_occ = np.zeros(2*n_ao)
+    gmf.mo_occ[:n_ao] = mf.mo_occ[0]
+    gmf.mo_occ[n_ao:] = mf.mo_occ[1]
+    dm = gmf.make_rdm1()
+
+    pyscf_interface.prep_afqmc(
+        gmf, basis_coeff=np.eye(2*n_ao), integrals=integrals_g, chol_cut=chol_cut, tmpdir=tmpdir
+    )
+    ham_data, ham, prop, trial, wave_data, sampler, observable, options = launch_script.setup_afqmc(
+        options, tmp_dir=tmpdir
+    )
+    trial = wavefunctions.ghf_cpmc(n_ao, n_elec)
+    wave_data["mo_coeff"] = gmf.mo_coeff[:, gmf.mo_occ>0]
+    wave_data["rdm1"] = dm
+    ham_data["u"] = integrals_g["u"]
+    prop = propagation.propagator_cpmc_slow(
+        dt=options["dt"],
+        n_walkers=options["n_walkers"],
+        walker_type=options["walker_type"]
+    )
+    init_walkers = GHFWalkers(jnp.array([gmf.mo_coeff[:, gmf.mo_occ>0]] * n_walkers))
+    ene2, err2 = driver.afqmc(
+        ham_data, ham, prop, trial, wave_data, sampler, observable, options, comm, tmpdir=tmpdir,
+        init_walkers=init_walkers
+    )
+    
+    assert np.isclose(ene1, ene2, atol=1e-6), f"{ene1} {ene2}"
+    assert np.isclose(err1, err2, atol=1e-8), f"{err1} {err2}"
+    
+
 # Hubbard
 def test_hubbard(env):
     check_hubbard(env)
@@ -215,6 +303,8 @@ def check_hubbard(env):
     mf.kernel(dm_init)
 
     check_hf(mf, integrals, options, comm)
+    check_hf_slow(mf, integrals, options, comm)
+
 
 if __name__ == "__main__":
     env = make_env()
