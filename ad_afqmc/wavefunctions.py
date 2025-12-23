@@ -2211,7 +2211,12 @@ class ghf_cpmc(ghf, wave_function_cpmc):
         green = self._calc_green_full_generalized(walker, wave_data)
         u = ham_data["u"]
         h1 = ham_data["h1"]
-        energy_1 = jnp.trace(green @ h1)
+        if h1.ndim == 3:
+            energy_1 = jnp.sum(green[: self.norb, : self.norb] * h1[0]) + jnp.sum(
+                green[self.norb :, self.norb :] * h1[1]
+            )
+        else:
+            energy_1 = jnp.trace(green @ h1)
         energy_2 = u * (
             jnp.sum(
                 green[: self.norb, : self.norb].diagonal()
