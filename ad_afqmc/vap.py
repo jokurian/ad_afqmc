@@ -10,6 +10,63 @@ import numpy as np
 import optax
 from jax import jit
 
+print = partial(print, flush=True)
+
+
+def occ_columns_from_theta(theta: jnp.ndarray) -> jnp.ndarray:
+    """
+    Complex exponential parametrization of a Slater determinant.
+    """
+    theta = jnp.asarray(theta)
+    n_occ = theta.shape[0]
+    U, s, Vh = jnp.linalg.svd(theta, full_matrices=False)
+    V = jnp.conj(Vh.T)
+    c = jnp.cos(s)
+    sn = jnp.sin(s)
+    I_occ = jnp.eye(n_occ, dtype=theta.dtype)
+    U_oo = I_occ + U @ jnp.diag(c - 1.0) @ jnp.conj(U.T)
+    U_vo = V @ jnp.diag(sn) @ jnp.conj(U.T)
+    C = jnp.vstack([U_oo, U_vo])
+    return C
+
+
+def theta_from_occ_columns(C: jnp.ndarray) -> jnp.ndarray:
+    """
+    Recover a complex Thouless matrix theta from a Slater determinant.
+    """
+    C = jnp.asarray(C)
+    n_occ = C.shape[1]
+    C_occ = C[:n_occ, :]
+    C_vir = C[n_occ:, :]
+    X = C_vir @ jnp.linalg.inv(C_occ)
+    Ux, t, Vxh = jnp.linalg.svd(X, full_matrices=False)
+    Vx = jnp.conj(Vxh.T)
+    s = jnp.arctan(t)
+    theta = Vx @ jnp.diag(s) @ jnp.conj(Ux.T)
+    return theta
+
+
+def _pack_psi(psi: jnp.ndarray) -> jnp.ndarray:
+    """
+    Flatten a complex psi into a real parameter vector
+    [Re(psi), Im(psi)].
+    """
+    psi = jnp.asarray(psi)
+    re = jnp.real(psi).ravel()
+    im = jnp.imag(psi).ravel()
+    return jnp.concatenate([re, im])
+
+
+def _unpack_psi(theta: jnp.ndarray, shape) -> jnp.ndarray:
+    """
+    Map a real parameter vector back to complex psi with given shape.
+    """
+    theta = jnp.asarray(theta)
+    n = int(np.prod(shape))
+    re = theta[:n].reshape(shape)
+    im = theta[n:].reshape(shape)
+    return re + 1.0j * im
+
 
 def apply_sz_projector(
     input_ket: jnp.ndarray, m: float, n_grid: int
@@ -425,6 +482,23 @@ class point_group_projector(projector):
         return new_kets, new_coeffs
 
 
+@dataclass
+class k_projector(projector):
+    """Project complex conjugation symmetry."""
+
+    parity: int = 1
+
+    def apply(
+        self, kets: jnp.ndarray, coeffs: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        kets_conj = jnp.conj(kets)
+        new_kets = jnp.concatenate([kets, kets_conj], axis=0)
+        new_coeffs = 0.5 * jnp.concatenate(
+            [coeffs, self.parity * jnp.conj(coeffs)], axis=0
+        )
+        return new_kets, new_coeffs
+
+
 def _apply_projector_sequence(
     psi: jnp.ndarray, projectors: tuple[projector, ...]
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
@@ -447,18 +521,144 @@ def _apply_projector_sequence(
     return kets, coeffs
 
 
+def _has_k_projector(projectors: tuple[projector, ...]) -> bool:
+    return any(isinstance(p, k_projector) for p in projectors)
+
+
+def _split_projectors_for_k(
+    projectors: tuple[projector, ...],
+) -> tuple[tuple[projector, ...], int]:
+    """
+    Split projectors into:
+      - linear/unitary projectors Q (spin, PG, etc.)
+      - combined parity for any k_projector present.
+
+    We assume at most a small number of k_projector instances; their parities
+    just multiply.
+    """
+    linear_projectors: list[projector] = []
+    parity = 1
+    for p in projectors:
+        if isinstance(p, k_projector):
+            parity *= p.parity
+        else:
+            linear_projectors.append(p)
+    return tuple(linear_projectors), parity
+
+
 def _evaluate_projected_energy(
-    psi: jnp.ndarray, ham: hamiltonian, projectors: tuple[projector, ...]
+    psi: jnp.ndarray, ham: hamiltonian, projectors: tuple[projector, ...] = tuple()
 ) -> jnp.ndarray:
-    """Evaluate the projected energy after applying a sequence of projectors."""
-    kets, coeffs = _apply_projector_sequence(psi, projectors)
-    return _evaluate_linear_expansion_energy(psi, kets, coeffs, ham)
+    """
+    Evaluate the projected energy after applying a sequence of projectors.
+    """
+    if not _has_k_projector(projectors):
+        kets, coeffs = _apply_projector_sequence(psi, projectors)
+        return _evaluate_linear_expansion_energy(psi, kets, coeffs, ham)
+
+    linear_projectors, parity = _split_projectors_for_k(projectors)
+
+    phi0 = psi
+    phi1 = jnp.conj(psi)
+    bras = (phi0, phi1)
+
+    if jnp.issubdtype(psi.dtype, jnp.complexfloating):
+        cdtype = psi.dtype
+    else:
+        cdtype = jnp.complex128
+
+    contexts = [ham.prepare(bra) for bra in bras]
+    bra_t_conjs = [bra.T.conj() for bra in bras]
+
+    exp_kets = []
+    exp_coeffs = []
+    for j in range(2):
+        kets_j, coeffs_j = _apply_projector_sequence(bras[j], linear_projectors)
+        exp_kets.append(kets_j)
+        exp_coeffs.append(coeffs_j)
+
+    S = jnp.zeros((2, 2), dtype=cdtype)
+    H = jnp.zeros((2, 2), dtype=cdtype)
+
+    for i in range(2):
+        bra = bras[i]
+        ctx = contexts[i]
+        bra_t_conj = bra_t_conjs[i]
+
+        def compute_overlap(ket):
+            ovlp_mat = bra_t_conj @ ket
+            return jsp.linalg.det(ovlp_mat)
+
+        def compute_energy(ket):
+            return ham.mixed_energy(bra, ket, ctx)
+
+        for j in range(2):
+            kets_j = exp_kets[j]
+            coeffs_j = exp_coeffs[j]
+
+            overlaps_ij = jax.vmap(compute_overlap)(kets_j)
+            energies_ij = jax.vmap(compute_energy)(kets_j)
+
+            S_ij = jnp.sum(coeffs_j * overlaps_ij)
+            H_ij = jnp.sum(coeffs_j * overlaps_ij * energies_ij)
+
+            S = S.at[i, j].set(S_ij)
+            H = H.at[i, j].set(H_ij)
+
+    d = jnp.array([1.0 + 0.0j, float(parity) + 0.0j], dtype=cdtype)
+
+    num = jnp.vdot(d, H @ d)
+    den = jnp.vdot(d, S @ d)
+    return (num / den).real
+
+
+# def _evaluate_projected_energy(
+#     psi: jnp.ndarray, ham: hamiltonian, projectors: tuple[projector, ...]
+# ) -> jnp.ndarray:
+#     """Evaluate the projected energy after applying a sequence of projectors."""
+#     kets, coeffs = _apply_projector_sequence(psi, projectors)
+#     return _evaluate_linear_expansion_energy(psi, kets, coeffs, ham)
+
+
+def make_energy_fn(ham, projectors, theta_shape):
+    """
+    Returns E(theta), where theta is a real 1D vector encoding complex psi.
+    """
+
+    def energy_fn(theta: jnp.ndarray) -> jnp.ndarray:
+        theta = _unpack_psi(theta, theta_shape)
+        psi = occ_columns_from_theta(theta)
+        E = _evaluate_projected_energy(psi, ham, projectors)
+        return jnp.real(E)
+
+    return energy_fn
+
+
+def calculate_hessian(theta, ham, projectors=tuple()):
+    """
+    Compute the Hessian of the projected energy with respect to the
+    real parameters (Re(theta), Im(theta)) at theta.
+    """
+    theta = jnp.asarray(theta, dtype=jnp.complex128)
+    theta_shape = theta.shape
+    theta = _pack_psi(theta)
+
+    energy_fn = make_energy_fn(ham, projectors, theta_shape)
+    energy_jit = jax.jit(energy_fn)
+    grad_jit = jax.jit(jax.grad(energy_fn))
+    hess_jit = jax.jit(jax.hessian(energy_fn))
+
+    E0 = energy_jit(theta)
+    grad = grad_jit(theta)
+    H = hess_jit(theta)
+
+    return float(np.array(E0)), np.array(grad), np.array(H)
 
 
 def calculate_projected_energy(
     psi: jnp.ndarray,
     ham: hamiltonian,
-    projectors: tuple[projector, ...],
+    projectors: tuple[projector, ...] = tuple(),
 ) -> jnp.ndarray:
     """
     Calculate the projected energy of a GHF determinant under optional symmetry projections.
@@ -482,10 +682,13 @@ def calculate_projected_energy(
 def optimize(
     psi: jnp.ndarray,
     ham: hamiltonian,
-    projectors: tuple[projector, ...],
+    projectors: tuple[projector, ...] = tuple(),
     maxiter: int = 100,
+    grad_conv_tol: float = 1e-5,
     step: float = 0.01,
     printQ: bool = True,
+    optimizer_name: str = "lbfgs",
+    use_thouless: bool = False,
 ) -> tuple[float, np.ndarray]:
     """
     Variationally optimize a GHF determinant under optional symmetry projections.
@@ -497,36 +700,72 @@ def optimize(
         maxiter: Number of Optax steps for Optax.
         step: AMSGrad learning rate.
     """
-    psi_var = jnp.asarray(psi)
-    psi_dtype = psi_var.dtype
+    psi0 = jnp.asarray(psi, dtype=jnp.complex128)
+    psi_shape = psi0.shape
+    if use_thouless:
+        psi0 = jnp.linalg.qr(psi0)[0]
+        theta0 = theta_from_occ_columns(psi0)
+        theta_shape = theta0.shape
+        theta0 = _pack_psi(theta0)
 
-    def objective_function(current_psi: jnp.ndarray) -> jnp.ndarray:
-        energy = _evaluate_projected_energy(current_psi, ham, projectors)
-        return jnp.real(energy)
+        def objective_function(theta: jnp.ndarray) -> jnp.ndarray:
+            current_theta = _unpack_psi(theta, theta_shape)
+            current_psi = occ_columns_from_theta(current_theta)
+            energy = _evaluate_projected_energy(current_psi, ham, projectors)
+            return jnp.real(energy)
+
+    else:
+        theta0 = _pack_psi(psi0)
+
+        def objective_function(theta: jnp.ndarray) -> jnp.ndarray:
+            current_psi = _unpack_psi(theta, psi_shape)
+            energy = _evaluate_projected_energy(current_psi, ham, projectors)
+            return jnp.real(energy)
 
     objective_function = jit(objective_function)
     value_and_grad = jit(jax.value_and_grad(objective_function))
-    optimizer = optax.amsgrad(step, b2=0.99)
-    opt_state = optimizer.init(psi_var)
+    if optimizer_name == "amsgrad":
+        optimizer = optax.amsgrad(step, b2=0.99)
+    elif optimizer_name == "lbfgs":
+        optimizer = optax.lbfgs(memory_size=10)
+    else:
+        raise ValueError(f"Unknown optimizer name: {optimizer_name}")
+    opt_state = optimizer.init(theta0)
 
-    energy = float(np.array(objective_function(psi_var)))
+    theta = theta0
+    energy = float(np.array(objective_function(theta)))
     print(f"\n# Initial projected energy = {energy}")
-    print("Starting optimization with Optax AMSGrad...")
+    print(f"Starting optimization with Optax {optimizer_name}...")
 
     for iteration in range(maxiter):
-        energy_val, grads = value_and_grad(psi_var)
+        energy_val, grads = value_and_grad(theta)
         grads_real = jnp.real(grads)
         grad_norm = float(np.array(jnp.linalg.norm(jnp.ravel(grads_real))))
-        grads_typed = grads_real.astype(psi_dtype)
-        updates, opt_state = optimizer.update(grads_typed, opt_state, psi_var)
-        psi_var = optax.apply_updates(psi_var, updates)
+        # grads_typed = grads_real.astype(psi_dtype)
+        updates, opt_state = optimizer.update(
+            grads_real,
+            opt_state,
+            theta,
+            value=energy_val,
+            grad=grads_real,
+            value_fn=objective_function,
+        )
+        theta = optax.apply_updates(theta, updates)
         energy = energy_val
         if printQ:
             print(
                 f"Iteration {iteration + 1}: Energy = {float(np.array(energy_val))}, "
                 f"Grad norm = {grad_norm}"
             )
-    return float(np.array(energy)), np.array(psi_var)
+        if grad_norm < grad_conv_tol:
+            print("Converged!")
+            break
+    if use_thouless:
+        theta_opt = _unpack_psi(jnp.array(theta), theta_shape)
+        psi_opt = occ_columns_from_theta(theta_opt)
+    else:
+        psi_opt = _unpack_psi(jnp.array(theta), psi_shape)
+    return float(np.array(energy)), np.array(psi_opt)
 
 
 def _evaluate_projected_property(
