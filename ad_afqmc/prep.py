@@ -566,7 +566,7 @@ class IOMode(Enum):
 
     def check(io_mode):
         if not isinstance(io_mode, IOMode):
-            raise TypeError(f"Type '{io}' instead of IOMode.Read/Write/NoIO.")
+            raise TypeError(f"Type '{type(io_mode)}' instead of IOMode.Read/Write/NoIO.")
 
 class IO:
     __slots__ = ("options", "fcidump", "trial_coeff", "amplitudes")
