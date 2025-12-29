@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import jax.scipy as jsp
 import numpy as np
 import optax
-from jax import jit
+from jax import tree_util
 
 print = partial(print, flush=True)
 
@@ -689,83 +689,139 @@ def optimize(
     printQ: bool = True,
     optimizer_name: str = "lbfgs",
     use_thouless: bool = False,
+    param_file: str | None = None,
 ) -> tuple[float, np.ndarray]:
     """
     Variationally optimize a GHF determinant under optional symmetry projections.
 
     Args:
         psi: Initial GHF determinant.
-        ham: Hamiltonian object implementing the mixed-energy interface.
+        ham: Hamiltonian object implementing the mixed energy interface.
         projectors: Sequence of projector objects applied to |psi>.
-        maxiter: Number of Optax steps for Optax.
-        step: AMSGrad learning rate.
+        maxiter: Maximum number of optimization iterations.
+        grad_conv_tol: Convergence tolerance on gradient norm.
+        step: Initial step size for optimizers that require it.
+        printQ: Whether to print optimization progress.
+        optimizer_name: Name of the Optax optimizer to use ("lbfgs" or "amsgrad").
+        use_thouless: Whether to parametrize psi via Thouless rotations.
+        param_file: If provided, save optimized parameters to this file.
+
+    Returns:
+      (final_energy, psi_opt_np)
     """
     psi0 = jnp.asarray(psi, dtype=jnp.complex128)
     psi_shape = psi0.shape
+    theta_shape = None
+
     if use_thouless:
         psi0 = jnp.linalg.qr(psi0)[0]
-        theta0 = theta_from_occ_columns(psi0)
-        theta_shape = theta0.shape
-        theta0 = _pack_psi(theta0)
+        theta0_mat = theta_from_occ_columns(psi0)
+        theta_shape = theta0_mat.shape
+        theta0 = _pack_psi(theta0_mat)
 
-        def objective_function(theta: jnp.ndarray) -> jnp.ndarray:
+        def objective_thouless(theta: jnp.ndarray) -> jnp.ndarray:
             current_theta = _unpack_psi(theta, theta_shape)
             current_psi = occ_columns_from_theta(current_theta)
             energy = _evaluate_projected_energy(current_psi, ham, projectors)
             return jnp.real(energy)
 
+        objective_function = objective_thouless
     else:
         theta0 = _pack_psi(psi0)
 
-        def objective_function(theta: jnp.ndarray) -> jnp.ndarray:
+        def objective_direct(theta: jnp.ndarray) -> jnp.ndarray:
             current_psi = _unpack_psi(theta, psi_shape)
             energy = _evaluate_projected_energy(current_psi, ham, projectors)
             return jnp.real(energy)
 
-    objective_function = jit(objective_function)
-    value_and_grad = jit(jax.value_and_grad(objective_function))
+        objective_function = objective_direct
+
+    value_fn = jax.jit(objective_function)
+
     if optimizer_name == "amsgrad":
         optimizer = optax.amsgrad(step, b2=0.99)
+        vg = jax.jit(jax.value_and_grad(value_fn))
+
+        def valgrad_amsgrad(theta, opt_state):
+            val, grad = vg(theta)
+            return val, grad
+
+        def update_amsgrad(grad, opt_state, theta, value):
+            updates, new_state = optimizer.update(grad, opt_state, params=theta)
+            return updates, new_state
+
+        valgrad_fn = valgrad_amsgrad
+        update_fn = update_amsgrad
+
     elif optimizer_name == "lbfgs":
         optimizer = optax.lbfgs(memory_size=10)
+        vgs = optax.value_and_grad_from_state(value_fn)
+
+        def valgrad_lbfgs(theta, opt_state):
+            val, grad = vgs(theta, state=opt_state)
+            return val, grad
+
+        def update_lbfgs(grad, opt_state, theta, value):
+            updates, new_state = optimizer.update(
+                grad,
+                opt_state,
+                params=theta,
+                value=value,
+                grad=grad,
+                value_fn=value_fn,
+            )
+            return updates, new_state
+
+        valgrad_fn = valgrad_lbfgs
+        update_fn = update_lbfgs
+
     else:
         raise ValueError(f"Unknown optimizer name: {optimizer_name}")
+
     opt_state = optimizer.init(theta0)
-
     theta = theta0
-    energy = float(np.array(objective_function(theta)))
-    print(f"\n# Initial projected energy = {energy}")
-    print(f"Starting optimization with Optax {optimizer_name}...")
 
-    for iteration in range(maxiter):
-        energy_val, grads = value_and_grad(theta)
-        grads_real = jnp.real(grads)
-        grad_norm = float(np.array(jnp.linalg.norm(jnp.ravel(grads_real))))
-        # grads_typed = grads_real.astype(psi_dtype)
-        updates, opt_state = optimizer.update(
-            grads_real,
-            opt_state,
-            theta,
-            value=energy_val,
-            grad=grads_real,
-            value_fn=objective_function,
-        )
+    @jax.jit
+    def opt_step(theta, opt_state):
+        value, grad = valgrad_fn(theta, opt_state)
+        grad = tree_util.tree_map(jnp.real, grad)
+        updates, opt_state = update_fn(grad, opt_state, theta, value)
         theta = optax.apply_updates(theta, updates)
-        energy = energy_val
+        grad_norm = optax.global_norm(grad)
+        return theta, opt_state, value, grad_norm
+
+    e0 = float(jax.device_get(value_fn(theta)))
+    if printQ:
+        print(f"\n# Initial projected energy = {e0}")
+        print(f"Starting optimization with Optax {optimizer_name}...")
+
+    energy = e0
+    for iteration in range(maxiter):
+        theta, opt_state, value, grad_norm = opt_step(theta, opt_state)
+
+        energy = float(jax.device_get(value))
+        gn = float(jax.device_get(grad_norm))
+
         if printQ:
-            print(
-                f"Iteration {iteration + 1}: Energy = {float(np.array(energy_val))}, "
-                f"Grad norm = {grad_norm}"
-            )
-        if grad_norm < grad_conv_tol:
-            print("Converged!")
+            print(f"Iteration {iteration + 1}: Energy = {energy}, Grad norm = {gn}")
+
+        if gn < grad_conv_tol:
+            if printQ:
+                print("Converged!")
             break
+
+    # unpack final params back to psi
     if use_thouless:
-        theta_opt = _unpack_psi(jnp.array(theta), theta_shape)
+        theta_opt = _unpack_psi(theta, theta_shape)
         psi_opt = occ_columns_from_theta(theta_opt)
     else:
-        psi_opt = _unpack_psi(jnp.array(theta), psi_shape)
-    return float(np.array(energy)), np.array(psi_opt)
+        psi_opt = _unpack_psi(theta, psi_shape)
+
+    psi_opt_np = np.array(jax.device_get(psi_opt))
+    if param_file is not None:
+        np.savetxt(param_file, psi_opt_np)
+
+    return float(energy), psi_opt_np
 
 
 def _evaluate_projected_property(
