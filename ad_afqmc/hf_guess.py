@@ -1,31 +1,24 @@
 import numpy as np
 
 def get_neel_sites(lattice):
+    # TODO: Only works for XC lattice.
     sites = lattice.sites
-    neel_sites = {f"site_{i}": [] for i in range(3)}
+    neel_sites = {f'site_{i}': [] for i in range(3)}
 
-    if (lattice.boundary == "xc") or (lattice.boundary == "oxc"):
-        for site in sites:
-            y, x = site
-            i = lattice.get_site_num(site)
-            if y % 2 == 0: x += 1
-            if x % 3 == 0: neel_sites["site_0"].append(i)
-            elif x % 3 == 1: neel_sites["site_1"].append(i)
-            elif x % 3 == 2: neel_sites["site_2"].append(i)
-
-    elif lattice.boundary == "yc":
-        for site in sites:
-            y, x = site
-            i = lattice.get_site_num(site)
-            if x % 2 == 1: y += 1
-            if y % 3 == 0: neel_sites["site_0"].append(i)
-            elif y % 3 == 1: neel_sites["site_1"].append(i)
-            elif y % 3 == 2: neel_sites["site_2"].append(i)
+    for site in sites:
+        y, x = site
+        i = lattice.get_site_num(site)
+        if y % 2 == 0: x += 1
+        if x % 3 == 0: neel_sites['site_0'].append(i)
+        elif x % 3 == 1: neel_sites['site_1'].append(i)
+        elif x % 3 == 2: neel_sites['site_2'].append(i)
 
     return neel_sites
 
 def get_ghf_neel_guess(lattice):
-    # Only for half-filling. Places 1 electron per site with Neel spins.
+    # TODO: 
+    #   Only works for XC lattice.
+    #   Only for half-filling. Places 1 electron per site with Neel spins.
     n_sites = lattice.n_sites
     neel_sites = get_neel_sites(lattice)
     init_psi = np.zeros((2*n_sites, n_sites))
