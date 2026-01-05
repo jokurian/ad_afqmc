@@ -23,17 +23,17 @@ class PrepAfqmc:
         self.ao_basis = AoBasis()
         self.mo_basis = MoBasis()
         self.options = None
-        self.ci = None
-        self.cc = None
-        self.trial = None
+        self.ci = None # Not used
+        self.cc = None # Not used
+        self.trial = None # Not used
         self.path = Path()
-        self.tmp = Tmp()
+        self.tmp = Tmp() # This is bad and need to be changed
         self.io = IO()
         self.pyscf = Pyscf()
 
     # Returns data needed for the afqmc calculation
     def get_setup_data(self):
-        # TODO add assert to make sure setup_afqmc has been run before
+        # TODO add an assert to make sure setup_afqmc has been run before
         return (
             self.tmp.ham_data,
             self.tmp.ham,
@@ -49,7 +49,7 @@ class PrepAfqmc:
 
     # Prepares the data for the afqmc calculation
     def setup_afqmc(self):
-        # TODO add assert to make sure prep has been run before
+        # TODO add an assert to make sure prep has been run before
         self.set_ham()
         self.apply_symmetry_mask()
         self.read_observable()
@@ -58,7 +58,7 @@ class PrepAfqmc:
         self.set_sampler()
         self.setup_print()
 
-    # Read/Compute/Write what is needed for the calculation
+    # Reads/Computes/Writes what is needed for the calculation
     def prep(self):
         self.set_options()
         self.set_integrals()
@@ -92,6 +92,9 @@ class PrepAfqmc:
 
         return prep
 
+    ################
+    ### Wrappers ###
+    ################
     def setup_print(self):
         print(f"# norb: {self.mo_basis.norb}")
         print(f"# nelec: {(self.mo_basis.nelec_sp)}")
@@ -259,7 +262,6 @@ class PrepAfqmc:
 
     def compute_integrals(self):
         # TODO the function compute_cholesky_integrals should be split
-        # mol and mf should be removed
         h1e, chol, nelec, enuc, _, _ = utils.compute_cholesky_integrals(
             self.pyscf.mol,
             self.pyscf.mf,
@@ -331,8 +333,8 @@ class PrepAfqmc:
         elif io.is_write() or io.is_noio():
             #if self.mo_basis.trial_coeff is None:
             self.mo_basis.trial_coeff = utils.get_trial_coeffs(
-                self.pyscf.mol, # TODO Remove, only needed for the overlap
-                self.pyscf.mf, # TODO Replace with MoType
+                self.pyscf.mol,
+                self.pyscf.mf,
                 self.mo_basis.basis_coeff,
                 self.mo_basis.norb,
                 self.mo_basis.norb_frozen,
@@ -397,8 +399,8 @@ class PrepAfqmc:
             raise AttributeError(f"self.pyscf.cc must exist and point to the cc pyscf object in order to compute the amplitudes.")
         self.tmp.amplitudes = utils.get_ci_amplitudes_from_cc(self.pyscf.cc)
 
-    # TODO should only write them
-    # TODO should check amplitude shapes to avoid issue when using frozen orbitals
+    # TODO should only write the amplitudes
+    # TODO check the shape of amplitude to avoid issue when using frozen orbitals
     def write_amplitudes(self):
         utils.write_pyscf_ccsd(self.pyscf.cc, self.path.amplitudes)
 

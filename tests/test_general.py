@@ -1,5 +1,5 @@
 from pyscf import scf, gto, cc
-from ad_afqmc import utils, afqmc, afqmc
+from ad_afqmc import utils, afqmc
 from ad_afqmc.prep import PrepAfqmc
 import numpy as np
 import os
@@ -27,7 +27,7 @@ def check(obj, options, e, atol, mpi):
     if mpi:
         mpi_prefix = "mpirun "
         nproc = 2
-        prep.prep_afqmc(obj, chol_cut=1e-12, tmpdir=tmpdir)
+        PrepAfqmc.prep_afqmc(obj, chol_cut=1e-12, tmpdir=tmpdir)
         ene, _ = afqmc.run_afqmc(
             options=options, mpi_prefix=mpi_prefix, nproc=nproc, tmpdir=tmpdir
         )
