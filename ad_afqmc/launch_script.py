@@ -234,12 +234,21 @@ def set_ham(
     """
     ham = hamiltonian.hamiltonian(norb)
     nchol = chol.shape[0]
-    ham_data = {
-        "h0": h0,
-        "h1": jnp.array([h1, h1]),  # Replicate for up/down spins
-        "chol": chol.reshape(nchol, -1),
-        "ene0": ene0,
-    }
+    nbasis = h1.shape[-1]
+    if nbasis == 2*norb: # GHF-type
+        ham_data = {
+            "h0": h0,
+            "h1": h1,
+            "chol": chol.reshape(nchol, -1),
+            "ene0": ene0,
+        }
+    else:
+        ham_data = {
+            "h0": h0,
+            "h1": jnp.array([h1, h1]),  # Replicate for up/down spins
+            "chol": chol.reshape(nchol, -1),
+            "ene0": ene0,
+        }
     return ham, ham_data
 
 
@@ -297,14 +306,20 @@ def set_trial(
     except:
         # Construct RDM1 from mo_coeff if file not found
         if options_trial in ["ghf", "ghf_complex", "gcisd_complex"]:
-            wave_data["rdm1"] = jnp.array(
-                [
-                    mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]]
-                    @ mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]].T.conj(),
-                    mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]]
-                    @ mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]].T.conj(),
-                ]
-            )
+            if options["walker_type"] == "generalized":
+                wave_data["rdm1"] = jnp.array(
+                        mo_coeff[:, : nelec_sp[0] + nelec_sp[1]]
+                        @ mo_coeff[:, : nelec_sp[0] + nelec_sp[1]].T.conj()
+                )
+            else:
+                wave_data["rdm1"] = jnp.array(
+                    [
+                        mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]]
+                        @ mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]].T.conj(),
+                        mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]]
+                        @ mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]].T.conj(),
+                    ]
+                )
 
         else:
             wave_data["rdm1"] = jnp.array(
@@ -584,7 +599,7 @@ def set_trial(
             n_chunks=options["n_chunks"],
             projector=options["symmetry_projector"],
         )
-        wave_data["mo_coeff"] = mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]]
+        wave_data["mo_coeff"] = mo_coeff[:, : nelec_sp[0] + nelec_sp[1]]
 
     elif options_trial == "ghf_complex":
         trial = wavefunctions.ghf_complex(
@@ -593,7 +608,7 @@ def set_trial(
             n_chunks=options["n_chunks"],
             projector=options["symmetry_projector"],
         )
-        wave_data["mo_coeff"] = mo_coeff[0][:, : nelec_sp[0] + nelec_sp[1]]
+        wave_data["mo_coeff"] = mo_coeff[:, : nelec_sp[0] + nelec_sp[1]]
 
     elif options_trial == "gcisd_complex":
         try:
@@ -737,8 +752,12 @@ def setup_afqmc(
     """
     directory = tmp_dir if tmp_dir is not None else tmpdir
 
-    h0, h1, chol, norb, nelec_sp = read_fcidump(directory)
+    h0, h1, chol, nbasis, nelec_sp = read_fcidump(directory)
     options = read_options(options, directory)
+    if options["walker_type"] == "generalized":
+        norb = nbasis // 2
+    else:
+        norb = nbasis
     observable = read_observable(norb, options, directory)
     ham, ham_data = set_ham(norb, h0, h1, chol, options["ene0"])
     ham_data = apply_symmetry_mask(ham_data, options)
