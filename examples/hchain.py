@@ -3,7 +3,7 @@ from functools import partial
 import numpy as np
 from pyscf import fci, gto, scf
 
-from ad_afqmc import pyscf_interface, run_afqmc
+from ad_afqmc import utils, afqmc
 
 print = partial(print, flush=True)
 
@@ -29,7 +29,7 @@ fci_ene, fci_vec = cisolver.kernel()
 print(f"fci_ene: {fci_ene}", flush=True)
 
 # ad afqmc
-pyscf_interface.prep_afqmc(umf)
+utils.prep_afqmc(umf)
 options = {
     "n_eql": 2,
     "n_ene_blocks": 1,
@@ -44,5 +44,5 @@ options = {
 # serial run
 # run_afqmc.run_afqmc(options=options, mpi_prefix='')
 
-run_afqmc.run_afqmc(options=options, nproc=4)
+afqmc.run_afqmc(options=options, nproc=4)
 

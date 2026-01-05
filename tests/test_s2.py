@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 from pyscf import gto, scf, fci, ci, cc
 from pyscf.cc.uccsd import UCCSD
-from ad_afqmc import afqmc, config, pyscf_interface, launch_script, Wigner_small_d
+from ad_afqmc import afqmc, config, utils, Wigner_small_d
 from ad_afqmc.walkers import UHFWalkers
 import pickle
 
@@ -57,13 +57,15 @@ def prep(obj, target_spin):
     af.symmetry_projector = "s2"
     af.target_spin = target_spin
     af.tmpdir = "."
+    af.free_projection = True
+    af.write_to_disk = True
     af.kernel(dry_run=True)
-    
+
     with open("options.bin", "rb") as f:
         options = pickle.load(f)
-    
+
     if isinstance(obj, UCCSD):
-        pyscf_interface.read_pyscf_ccsd(obj, options["tmpdir"])
+        utils.write_pyscf_ccsd(obj, options["tmpdir"])
 
     (
         ham_data,
@@ -76,8 +78,8 @@ def prep(obj, target_spin):
         sampler,
         observable,
         options,
-    ) = launch_script.setup_afqmc_fp(options, options["tmpdir"])
-    
+    ) = utils.setup_afqmc_fp(options, options["tmpdir"])
+ 
     ham_data = ham.build_measurement_intermediates(ham_data, trial_bra, wave_data_bra)
     ham_data = ham.build_propagation_intermediates(
         ham_data, prop, trial_bra, wave_data_bra
@@ -98,9 +100,9 @@ def check(options, ham_data, trial_bra, wave_data_bra):
     wb = get_walker(subkey, nmo, nb)
 
     walker = UHFWalkers([wa.reshape(1,nmo,na), wb.reshape(1, nmo, nb)])
-    
+
     e1 = trial_bra.calc_energy(walker, ham_data, wave_data_bra)
-    
+
     # Brute-force quadrature
     S = options["target_spin"] / 2.0
     Sz = (na - nb) / 2.0
@@ -118,7 +120,7 @@ def check(options, ham_data, trial_bra, wave_data_bra):
         / ngrid
     )
     wave_data_bra["betas"] = (S, Sz, w_betas, betas)
-    
+
     e2 = trial_bra.calc_energy(walker, ham_data, wave_data_bra)
 
     return e1, e2
@@ -128,7 +130,11 @@ def test_1():
     e1, e2 = check(options, ham_data, trial_bra, wave_data_bra)
 
     ref = -110.910853369073-1.040752960653j
-
+    print(ref)
+    print(e1)
+    print(e2)
+    print(e1-e2)
+    print(e2-ref)
     assert abs(e1-e2) < 1e-5
     assert abs(e2-ref) < 1e-5
 

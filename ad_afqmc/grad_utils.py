@@ -5,7 +5,7 @@ import numpy as np
 from pyscf import df, grad, gto, lib, scf
 from scipy.linalg import fractional_matrix_power
 
-from ad_afqmc import pyscf_interface
+from ad_afqmc import utils
 
 
 def get_transformation_matrix(S, lin_dep_thresh=1e-10):
@@ -146,7 +146,7 @@ def write_integrals_lowdins(mf, tmpdir="./"):
             can_mo=mf.mo_coeff,  # type: ignore
         )
 
-    pyscf_interface.write_dqmc(
+    utils.write_dqmc(
         h1e,
         h1e_mod,
         chol,

@@ -343,16 +343,12 @@ class two_dimensional_grid(lattice):
 
     @partial(jit, static_argnums=(0,))
     def get_nearest_neighbors(self, pos):
-        right = (pos[0], (pos[1] + 1) % self.l_x)
-        down = ((pos[0] + 1) % self.l_y, pos[1])
-        left = (pos[0], (pos[1] - 1) % self.l_x)
-        up = ((pos[0] - 1) % self.l_y, pos[1])
-
-        if self.boundary == "open_x":
-            right = (pos[0], pos[1] + 1)
-            left = (pos[0], pos[1] - 1)
-
-        elif self.boundary == "obc":
+        if self.boundary == "pbc":
+            right = (pos[0], (pos[1] + 1) % self.l_x)
+            down = ((pos[0] + 1) % self.l_y, pos[1])
+            left = (pos[0], (pos[1] - 1) % self.l_x)
+            up = ((pos[0] - 1) % self.l_y, pos[1])
+        else:  # obc
             right = (pos[0], pos[1] + 1)
             down = (pos[0] + 1, pos[1])
             left = (pos[0], pos[1] - 1)

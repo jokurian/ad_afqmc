@@ -65,6 +65,7 @@ def afqmc_energy(
     trial_rdm1 = trial.get_rdm1(wave_data)
     if "rdm1" not in wave_data:
         wave_data["rdm1"] = trial_rdm1
+
     ham_data = ham.build_measurement_intermediates(ham_data, trial, wave_data)
     ham_data = ham.build_propagation_intermediates(
         ham_data, propagator, trial, wave_data

@@ -7,7 +7,7 @@ from jax import config
 from jax._src.typing import DTypeLike
 import pickle
 from pyscf import gto, scf, cc
-from ad_afqmc import pyscf_interface, launch_script
+from ad_afqmc import utils, launch_script
 
 config.update("jax_enable_x64", True)
 
@@ -83,44 +83,44 @@ nelec = na+nb
 nmo = np.shape(mf.mo_coeff)[-1]
 
 # ghf
-pyscf_interface.prep_afqmc_ghf_complex(mol, gmf, tmpdir=tmp_ghf, chol_cut=chol_cut)
+utils.prep_afqmc_ghf_complex(mol, gmf, tmpdir=tmp_ghf, chol_cut=chol_cut)
 ghf = Obj()
 ghf.options = options
 ghf.options["trial"] = "ghf_complex"
 ghf.options["walker_type"] = "generalized"
-ghf.ham_data, ghf.ham, ghf.prop, ghf.trial, ghf.wave_data, ghf.sampler, ghf.observable, ghf.options = launch_script.setup_afqmc(
+ghf.ham_data, ghf.ham, ghf.prop, ghf.trial, ghf.wave_data, ghf.sampler, ghf.observable, ghf.options = utils.setup_afqmc(
     options=ghf.options, tmp_dir=tmp_ghf
 )
 ghf.ham_data = ghf.trial._build_measurement_intermediates(ghf.ham_data, ghf.wave_data)
 
 # uhf
-pyscf_interface.prep_afqmc(mf, chol_cut=chol_cut, tmpdir=tmp_uhf)
+utils.prep_afqmc(mf, chol_cut=chol_cut, tmpdir=tmp_uhf, write_to_disk=True)
 uhf = Obj()
 uhf.options = options
 uhf.options["trial"] = "uhf"
 uhf.options["walker_type"] = "unrestricted"
-uhf.ham_data, uhf.ham, uhf.prop, uhf.trial, uhf.wave_data, uhf.sampler, uhf.observable, uhf.options = launch_script.setup_afqmc(
+uhf.ham_data, uhf.ham, uhf.prop, uhf.trial, uhf.wave_data, uhf.sampler, uhf.observable, uhf.options = utils.setup_afqmc(
     options=uhf.options, tmp_dir=tmp_uhf
 )
 uhf.ham_data = uhf.trial._build_measurement_intermediates(uhf.ham_data, uhf.wave_data)
 
 # gcisd
-pyscf_interface.prep_afqmc_ghf_complex(mol, gmf, tmpdir=tmp_ghf, chol_cut=chol_cut)
+utils.prep_afqmc_ghf_complex(mol, gmf, tmpdir=tmp_ghf, chol_cut=chol_cut)
 gcisd = Obj()
 gcisd.options = options
 gcisd.options["trial"] = "gcisd_complex"
 gcisd.options["walker_type"] = "generalized"
-gcisd.ham_data, gcisd.ham, gcisd.prop, gcisd.trial, gcisd.wave_data, gcisd.sampler, gcisd.observable, gcisd.options = launch_script.setup_afqmc(
+gcisd.ham_data, gcisd.ham, gcisd.prop, gcisd.trial, gcisd.wave_data, gcisd.sampler, gcisd.observable, gcisd.options = utils.setup_afqmc(
     options=gcisd.options, tmp_dir=tmp_ghf
 )
 
 # ucisd
-pyscf_interface.prep_afqmc(ucc, chol_cut=chol_cut, tmpdir=tmp_uhf)
+utils.prep_afqmc(ucc, chol_cut=chol_cut, tmpdir=tmp_uhf, write_to_disk=True)
 ucisd = Obj()
 ucisd.options = options
 ucisd.options["trial"] = "ucisd"
 ucisd.options["walker_type"] = "unrestricted"
-ucisd.ham_data, ucisd.ham, ucisd.prop, ucisd.trial, ucisd.wave_data, ucisd.sampler, ucisd.observable, ucisd.options = launch_script.setup_afqmc(
+ucisd.ham_data, ucisd.ham, ucisd.prop, ucisd.trial, ucisd.wave_data, ucisd.sampler, ucisd.observable, ucisd.options = utils.setup_afqmc(
     options=ucisd.options, tmp_dir=tmp_uhf
 )
 ucisd.ham_data = ucisd.trial._build_measurement_intermediates(ucisd.ham_data, ucisd.wave_data)
@@ -131,13 +131,13 @@ ucisd.trial._mixed_complex_dtype_checking: DTypeLike = jnp.complex128
 # w_uhf = Y.T @ X @ w_ghf
 # w_ghf = X.T @ Y @ w_uhf
 # with X and Y s.t.
-# uhf_mos X = ghf_mos 
+# uhf_mos X = ghf_mos
 # uhf_trial Y = ghf_trial
 
 # Unitary transformation UHF MOs <-> GHF MOs
 uhf_mos = la.block_diag(mf.mo_coeff[0], mf.mo_coeff[1])
 ghf_mos = gmf.mo_coeff
-# uhf_mos X = ghf_mos 
+# uhf_mos X = ghf_mos
 X = np.linalg.solve(uhf_mos, ghf_mos)
 
 # Check
@@ -258,26 +258,26 @@ def check_energy_uhf_walker(w_a, w_b, display=True):
 def test_0():
     print("\n### 0 ###")
     w_a, w_b = ucisd.wave_data["mo_coeff"][0][:,:na], ucisd.wave_data["mo_coeff"][1][:,:nb] 
-    
+
     check_overlap_uhf_walker(w_a, w_b)
     check_energy_uhf_walker(w_a, w_b)
     #print(f" E(uccsd)      = {ucc.e_tot:.12f}")
     #print(f" E(gccsd)      = {gcc.e_tot:.12f}\n")
-    
+
 ### Test 1
 def test_1():
     print("\n### 1 ###")
-    w_a = get_walker(nmo,nmo)[:,:na] 
+    w_a = get_walker(nmo,nmo)[:,:na]
     w_b = get_walker(nmo,nmo)[:,:nb]
-    
+
     check_overlap_uhf_walker(w_a, w_b)
     check_energy_uhf_walker(w_a, w_b)
-    
+
 ### Test 2
 def test_2():
     print("\n### 2 ###")
     w_ghf = get_walker(2*nmo, nelec)
-    
+
     check_overlap_ghf_walker(w_ghf)
     check_energy_ghf_walker(w_ghf)
 

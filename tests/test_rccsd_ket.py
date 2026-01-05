@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from jax import config
 import numpy as np
 from pyscf import gto, scf
-from ad_afqmc import afqmc, launch_script, pyscf_interface, wavefunctions
+from ad_afqmc import afqmc, utils, wavefunctions
 import pickle
 
 config.update("jax_enable_x64", True)
@@ -19,15 +19,13 @@ def check_1(mf, mycc):
     af.walker_type= "restricted"
     af.ene0= mf.e_tot
     af.seed = 5
+    af.write_to_disk = True
+    af.tmpdir = "."
     af.kernel(dry_run=True)
-    
-    with open("tmpdir.txt", "r") as f:
-        tmpdir = f.read()
-    with open(tmpdir + "/options.bin", "rb") as f:
+
+    with open(af.tmpdir + "/options.bin", "rb") as f:
         options = pickle.load(f)
-    
-    pyscf_interface.read_pyscf_ccsd(mycc, tmpdir)
-    
+
     (
         ham_data,
         ham,
@@ -39,13 +37,13 @@ def check_1(mf, mycc):
         sampler,
         observable,
         options,
-    ) = launch_script.setup_afqmc_fp(options, options["tmpdir"])
-    
+    ) = utils.setup_afqmc_fp(options, options["tmpdir"])
+
     ham_data = ham.build_measurement_intermediates(ham_data, trial_bra, wave_data_bra)
     ham_data = ham.build_propagation_intermediates(
         ham_data, prop, trial_bra, wave_data_bra
     )
-    
+
     init_walkers = None
     prop_data = prop.init_prop_data(
         trial_bra, wave_data_bra, ham_data, af.seed, init_walkers
@@ -58,12 +56,12 @@ def check_1(mf, mycc):
             af.n_walkers,
             af.walker_type,
         )
-        
+
         energy_samples = jnp.real(
             trial_bra.calc_energy(prop_data["walkers"], ham_data, wave_data_bra)
         )
         e.append(jnp.array(jnp.sum(energy_samples) / af.n_walkers))
-    
+ 
     e = np.mean(e)
     print(e)
     assert abs(e-mycc.e_tot) < 1e-3
@@ -79,6 +77,8 @@ def check_2(mf, mycc):
     af.walker_type= "restricted"
     af.ene0= mf.e_tot
     af.seed = 5
+    af.write_to_disk = True
+    af.tmpdir = "."
     af.kernel()
 
 def check_3(mycc):
@@ -92,6 +92,8 @@ def check_3(mycc):
     af.walker_type= "restricted"
     af.ene0= mycc.e_tot
     af.seed = 5
+    af.write_to_disk = True
+    af.tmpdir = "."
     af.kernel()
 
 def run(mol):
