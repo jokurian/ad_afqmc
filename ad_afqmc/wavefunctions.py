@@ -2270,7 +2270,7 @@ class multi_ghf_cpmc(wave_function_cpmc):
         wave_data: dict,
     ) -> jax.Array:
         """
-        Multi-GHF local energy for a single UHF walker:
+        Local energy for a single UHF walker.
         """
         ci_coeffs = wave_data["ci_coeffs"]
         mo_coeffs = wave_data["mo_coeffs"]
@@ -2328,6 +2328,45 @@ class multi_ghf_cpmc(wave_function_cpmc):
         )
 
         return E_L
+
+    @partial(jit, static_argnums=0)
+    def _calc_density_corr_unrestricted(self, walker_up, walker_dn, wave_data):
+        """
+        Density correlation for a single UHF walker.
+        """
+        ci_coeffs = wave_data["ci_coeffs"]
+        mo_coeffs = wave_data["mo_coeffs"]
+
+        norb = self.norb
+        nelec_tot = self.nelec[0] + self.nelec[1]
+
+        walker_ghf = jsp.linalg.block_diag(walker_up, walker_dn)
+
+        def per_det(Ck, ck):
+            Cocc = Ck[:, :nelec_tot]
+            overlap_mat = Cocc.T.conj() @ walker_ghf
+            inv = jnp.linalg.inv(overlap_mat)
+            Gk = (walker_ghf @ inv @ Cocc.T.conj()).T
+            Gk_diag = jnp.diagonal(Gk)
+            density_corr = (
+                Gk_diag[:, None] * Gk_diag[None, :] - Gk * Gk.T + jnp.diag(Gk_diag)
+            )
+            Ok = jnp.linalg.det(overlap_mat)
+            wk = ck * Ok
+            return density_corr, wk
+
+        density_corrs, w_k = vmap(per_det, in_axes=(0, 0))(mo_coeffs, ci_coeffs)
+
+        num = jnp.sum(w_k[:, None, None] * density_corrs, axis=0).real
+        den = jnp.sum(w_k).real
+
+        density_corr = jnp.where(
+            jnp.abs(den) < 1.0e-16,
+            jnp.zeros((2 * norb, 2 * norb)),
+            num / den,
+        )
+
+        return density_corr
 
     @partial(jit, static_argnums=0)
     def _update_green(
@@ -2401,6 +2440,7 @@ class multi_ghf_cpmc(wave_function_cpmc):
         energy_tol: float = 1.0e-3,
         tol_same: float = 1.0e-5,
         auto_grid: bool = False,
+        k_projection: bool = False,
     ) -> dict:
         """
         Prepare symmetry-projected multi-GHF expansion.
@@ -2553,6 +2593,13 @@ class multi_ghf_cpmc(wave_function_cpmc):
             wd_local["ci_coeffs"] = ci_full
             return wd_local
 
+        def _apply_k_projection_to_expansion(mo_coeffs, ci_coeffs):
+            mo_conj = jnp.conj(mo_coeffs)
+            ci_conj = jnp.conj(ci_coeffs)
+            mo_all = jnp.concatenate([mo_coeffs, mo_conj], axis=0)
+            ci_all = jnp.concatenate([ci_coeffs, ci_conj], axis=0)
+            return mo_all, ci_all
+
         if (
             ((not (has_alpha and has_beta)) or auto_grid)
             and (ham_data is not None)
@@ -2568,6 +2615,13 @@ class multi_ghf_cpmc(wave_function_cpmc):
                 beta_vals, w_beta = _make_beta(n_beta)
 
                 wd_tmp = _build_pg_s2_expansion(alpha_vals, w_alpha, beta_vals, w_beta)
+                if k_projection:
+                    mo_k, ci_k = _apply_k_projection_to_expansion(
+                        wd_tmp["mo_coeffs"], wd_tmp["ci_coeffs"]
+                    )
+                    wd_tmp = dict(wd_tmp)
+                    wd_tmp["mo_coeffs"] = mo_k
+                    wd_tmp["ci_coeffs"] = ci_k
                 E = self._calc_energy_unrestricted(
                     walker_up, walker_dn, ham_data, wd_tmp
                 )
@@ -2602,6 +2656,17 @@ class multi_ghf_cpmc(wave_function_cpmc):
             beta_vals, w_beta = wave_data["beta"]
 
         wd_final = _build_pg_s2_expansion(alpha_vals, w_alpha, beta_vals, w_beta)
+
+        if k_projection:
+            mo_k, ci_k = _apply_k_projection_to_expansion(
+                wd_final["mo_coeffs"], wd_final["ci_coeffs"]
+            )
+            wd_final["mo_coeffs"] = mo_k
+            wd_final["ci_coeffs"] = ci_k
+            print(
+                f"K projection: {wd_final['ci_coeffs'].shape[0]} determinants "
+                f"after adding conjugates."
+            )
 
         wave_data["mo_coeffs"] = wd_final["mo_coeffs"]
         wave_data["ci_coeffs"] = wd_final["ci_coeffs"]

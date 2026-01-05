@@ -109,7 +109,7 @@ def prep_afqmc(
             basis_coeff = mf.mo_coeff
 
     # calculate cholesky integrals
-    h1e, chol, nelec, enuc, _, _ = compute_cholesky_integrals(
+    h1e, chol, nelec, enuc, nbasis, _ = compute_cholesky_integrals(
         mol, mf, basis_coeff, integrals, norb_frozen, chol_cut
     )
 
@@ -946,10 +946,13 @@ def write_pyscf_ccsd(cc, tmpdir):
             t2bb=cc.t2[2],
         )
     else:
+        ci2 = cc.t2 + np.einsum("ia,jb->ijab", np.array(cc.t1), np.array(cc.t1))
+        ci2 = ci2.transpose(0, 2, 1, 3)
+        ci1 = np.array(cc.t1)
         np.savez(
             tmpdir + "/amplitudes.npz",
-            ci1=ci_amps["ci1"],
-            ci2=ci_amps["ci2"],
+            ci1=ci1,
+            ci2=ci2,
             t1=cc.t1,
             t2=cc.t2,
         )
@@ -992,7 +995,7 @@ def compute_cholesky_integrals(mol, mf, basis_coeff, integrals, norb_frozen, cho
         )
         nbasis = h1e.shape[-1]
         nelec = mol.nelec
-
+        chol = chol.reshape((-1, nbasis, nbasis))
         if norb_frozen > 0:
             assert norb_frozen * 2 < sum(
                 nelec
@@ -1003,7 +1006,6 @@ def compute_cholesky_integrals(mol, mf, basis_coeff, integrals, norb_frozen, cho
             nelec = mc.nelecas  # type: ignore
             mc.mo_coeff = basis_coeff  # type: ignore
             h1e, enuc = mc.get_h1eff()  # type: ignore
-            chol = chol.reshape((-1, nbasis, nbasis))
             chol = chol[
                 :,
                 mc.ncore : mc.ncore + mc.ncas,  # type: ignore
