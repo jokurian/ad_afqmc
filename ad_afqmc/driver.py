@@ -1506,7 +1506,7 @@ def fp_afqmc(
     comm.Barrier()
     init_time = time.time() - init
     print("#\n# Sampling sweeps:")
-    print("#  Iter        Mean energy    Stochastic error    Sign")
+    print("#  Beta        Mean energy    Stochastic error    Sign")
     comm.Barrier()
 
     total_energy = np.zeros((sampler.n_ene_blocks, sampler.n_blocks + 1)) + 0.0j
@@ -1516,6 +1516,7 @@ def fp_afqmc(
     avg_energy = np.zeros((sampler.n_blocks)) + 0.0j
     avg_weight = np.zeros((sampler.n_blocks)) + 0.0j
 
+    t0 = time.time()
     for n in range(
         sampler.n_ene_blocks
     ):  # hacking this variable for number of trajectories
@@ -1611,7 +1612,8 @@ def fp_afqmc(
                         mean_signs[i].real,
                     )
                 )
-            print("")
+            t1 = time.time()
+            print(f"Wall time: {t1-t0:12.1f} s\n")
 
         np.savetxt(
             "samples_raw.dat",
