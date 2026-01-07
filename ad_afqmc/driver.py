@@ -1536,7 +1536,12 @@ def fp_afqmc(
 
         prop_data["overlaps"] = trial_bra.calc_overlap(prop_data["walkers"], wave_data_bra)
         prop_data["weights"] = jnp.ones_like(prop_data["weights"])
-        energy_samples = trial_bra.calc_energy(prop_data["walkers"], ham_data, wave_data_bra)
+
+        # Computing the energy at time = 0.0 is often unecessary
+        if "no_beta_0_fp" in options and options["no_beta_0_fp"]:
+            energy_samples = 0.0 + 0.0j
+        else:
+            energy_samples = trial_bra.calc_energy(prop_data["walkers"], ham_data, wave_data_bra)
 
         e_estimate = jnp.array(jnp.sum(energy_samples) / propagator.n_walkers)
         prop_data["e_estimate"] = e_estimate.real
