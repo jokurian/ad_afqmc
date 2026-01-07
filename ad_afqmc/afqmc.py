@@ -187,7 +187,7 @@ def run_afqmc_fp(prep):
             [orbitals[0] @ orbitals[0].T.conj(), orbitals[1] @ orbitals[1].T.conj()]
         ).reshape(-1, nao, nao)
 
-    driver.fp_afqmc(
+    e_afqmc, err_afqmc, sign = driver.fp_afqmc(
         ham_data,
         ham,
         prop,
@@ -201,6 +201,7 @@ def run_afqmc_fp(prep):
         comm,
     )
 
+    return e_afqmc, err_afqmc, sign
 
 class AFQMC:
     """

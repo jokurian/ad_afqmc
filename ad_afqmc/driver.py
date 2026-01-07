@@ -1631,3 +1631,5 @@ def fp_afqmc(
         np.savetxt("Raw_S.dat", total_sign[: n + 1].T)
 
         # print(f"{n:5d}: {mean_energies.real}")
+
+    return mean_energies.real, errors.real, mean_signs.real
