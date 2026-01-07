@@ -105,20 +105,23 @@ class sampler:
         wave_data: dict,
     ) -> Tuple[dict, Tuple]:
         """Block scan function for free propagation."""
+        prop_data["key"], subkey = random.split(prop_data["key"])
+        n_fields = self.n_qr_blocks * self.n_prop_steps
+        fields = random.normal(
+            subkey,
+            shape=(
+                self.n_qr_blocks,
+                self.n_prop_steps,
+                prop.n_walkers,
+                ham_data["chol"].shape[0],
+            ),
+        )
+
         _step_scan_wrapper = lambda x, y: self._step_scan_free(
             x, y, ham_data, prop, trial, wave_data
         )
 
-        def _qr_block_scan_free(prop_data: dict, _):
-            prop_data["key"], subkey = random.split(prop_data["key"])
-            fields = random.normal(
-                subkey,
-                shape=(
-                    self.n_prop_steps,
-                    prop.n_walkers,
-                    ham_data["chol"].shape[0],
-                ),
-            )
+        def _qr_block_scan_free(prop_data: dict, fields: jax.Array):
             prop_data, _ = lax.scan(_step_scan_wrapper, prop_data, fields)
 
             prop_data["walkers"], norms = prop_data["walkers"].orthogonalize()
@@ -129,8 +132,8 @@ class sampler:
         prop_data, _ = lax.scan(
             _qr_block_scan_free,
             prop_data,
-            None,
-            length=self.n_qr_blocks
+            fields,
+            #length=self.n_qr_blocks,
         )
 
         prop_data["overlaps"] = trial.calc_overlap(prop_data["walkers"], wave_data)
