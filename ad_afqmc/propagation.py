@@ -10,7 +10,7 @@ import jax.scipy as jsp
 from jax import jit, lax, random, vmap
 from jax._src.typing import DTypeLike
 
-from ad_afqmc import wavefunctions
+from ad_afqmc import wavefunctions, sr
 from ad_afqmc.walkers import GHFWalkers, RHFWalkers, UHFWalkers, walker_batch
 from ad_afqmc.wavefunctions import wave_function
 
@@ -365,14 +365,24 @@ class propagator_afqmc(propagator):
             prop_data["walkers"], fields, ham_data
         )
         prop_data["walkers"] = prop_data["walkers"].multiply_constants(constants)
-        prop_data["walkers"], norms = prop_data["walkers"].orthogonalize()
+        norms = prop_data["walkers"].qr_norm()
         prop_data["weights"] *= norms.real
+
         prop_data["key"], subkey = random.split(prop_data["key"])
         zeta = random.uniform(subkey)
+
+        # Since we compute only R in the QR we need to divide
+        # by norms.real after the SR, requiering to keep track
+        # of the indices
+        indices = sr.get_sr_indices(prop_data["weights"], zeta)
+        norms = norms[indices]
+
         prop_data["walkers"], prop_data["weights"] = prop_data[
             "walkers"
         ].stochastic_reconfiguration_local(prop_data["weights"], zeta)
-        prop_data["overlaps"] = trial.calc_overlap(prop_data["walkers"], wave_data)
+
+        prop_data["weights"] /= norms.real
+
         return prop_data
 
     @partial(jit, static_argnums=(0, 2))

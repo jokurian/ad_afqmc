@@ -77,6 +77,11 @@ class walker_batch(ABC):
         pass
 
     @abstractmethod
+    def qr_norm(self) -> jax.Array:
+        """QR in r mode."""
+        pass
+
+    @abstractmethod
     def multiply_constants(self, constants: jax.Array) -> "walker_batch":
         """Multiply walker data by constants."""
         pass
@@ -160,6 +165,11 @@ class RHFWalkers(walker_batch):
         """Orthonormalize walkers and return new walker_batch and norms."""
         new_data, norms = linalg_utils.qr_vmap_restricted(self.data)
         return self.__class__(new_data), norms**2
+
+    def qr_norm(self) -> jax.Array:
+        """QR in r mode."""
+        norms = linalg_utils.qr_norm_vmap_restricted(self.data)
+        return norms**2
 
     def multiply_constants(self, constants: jax.Array) -> "RHFWalkers":
         """Multiply walker data by constants."""
@@ -265,6 +275,11 @@ class UHFWalkers(walker_batch):
         """Orthonormalize walkers and return new walker_batch and norms."""
         new_walkers, norms = linalg_utils.qr_vmap_unrestricted(self.data)
         return self.__class__(new_walkers), norms[0] * norms[1]
+
+    def qr_norm(self) -> jax.Array:
+        """QR in r mode."""
+        norms = linalg_utils.qr_norm_vmap_unrestricted(self.data)
+        return norms[0] * norms[1]
 
     def multiply_constants(self, constants: jax.Array) -> "UHFWalkers":
         """Multiply walker data by constants."""

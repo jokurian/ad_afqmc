@@ -402,7 +402,7 @@ class AFQMC:
 class Options:
     # To catch typos...
     __slots__ = ("dt", "n_prop_steps", "n_ene_blocks",
-    "n_walkers", "n_sr_blocks", "n_blocks", "n_ene_blocks_eql",
+    "n_walkers", "n_sr_blocks", "n_qr_blocks", "n_blocks", "n_ene_blocks_eql",
     "n_sr_blocks_eql", "n_eql", "seed", "ad_mode", "orbital_rotation",
     "do_sr", "walker_type", "symmetry_projector", "ngrid", "optimize_trial",
     "target_spin", "symmetry", "save_walkers", "dR", "free_projection",
@@ -414,6 +414,7 @@ class Options:
         self.dt = 0.005
         self.n_prop_steps = 50
         self.n_ene_blocks = 1
+        self.n_qr_blocks = 1
         if mode == "small":
             self.n_walkers = 50
             self.n_sr_blocks = 1

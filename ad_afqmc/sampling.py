@@ -17,6 +17,7 @@ class sampler:
     n_prop_steps: int = 50
     n_ene_blocks: int = 50
     n_sr_blocks: int = 1
+    n_qr_blocks: int = 1
     n_blocks: int = 50
 
     @partial(jit, static_argnums=(0, 4, 5))
@@ -104,27 +105,35 @@ class sampler:
         wave_data: dict,
     ) -> Tuple[dict, Tuple]:
         """Block scan function for free propagation."""
-        prop_data["key"], subkey = random.split(prop_data["key"])
-        fields = random.normal(
-            subkey,
-            shape=(
-                self.n_prop_steps,
-                prop.n_walkers,
-                ham_data["chol"].shape[0],
-            ),
-        )
         _step_scan_wrapper = lambda x, y: self._step_scan_free(
             x, y, ham_data, prop, trial, wave_data
         )
-        prop_data, _ = lax.scan(_step_scan_wrapper, prop_data, fields)
 
-        # Already done in _step_scan_free by propagate_free
-        # prop_data["key"], subkey = random.split(prop_data["key"])
-        # zeta = random.uniform(subkey)
-        # prop_data["walkers"], prop_data["weights"] = prop_data[
-        #    "walkers"
-        # ].stochastic_reconfiguration_local(prop_data["weights"], zeta)
-        # prop_data["overlaps"] = trial.calc_overlap(prop_data["walkers"], wave_data)
+        def _qr_block_scan_free(prop_data: dict, _):
+            prop_data["key"], subkey = random.split(prop_data["key"])
+            fields = random.normal(
+                subkey,
+                shape=(
+                    self.n_prop_steps,
+                    prop.n_walkers,
+                    ham_data["chol"].shape[0],
+                ),
+            )
+            prop_data, _ = lax.scan(_step_scan_wrapper, prop_data, fields)
+
+            prop_data["walkers"], norms = prop_data["walkers"].orthogonalize()
+            prop_data["weights"] *= norms.real
+
+            return prop_data, fields
+
+        prop_data, _ = lax.scan(
+            _qr_block_scan_free,
+            prop_data,
+            None,
+            length=self.n_qr_blocks
+        )
+
+        prop_data["overlaps"] = trial.calc_overlap(prop_data["walkers"], wave_data)
 
         energy_samples = trial.calc_energy(prop_data["walkers"], ham_data, wave_data)
         energy_samples = jnp.where(

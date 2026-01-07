@@ -12,20 +12,18 @@ mol =  gto.M(atom ="""
     verbose = 3)
 
 def test_rhf():
-    # RHF
     mf = scf.RHF(mol)
     mf.kernel()
     
-    mycc = mf.CCSD(frozen=0).run()
-    
     af = afqmc.AFQMC(mf)
     af.free_projection = True
-    af.dt= 0.1
-    af.n_prop_steps= 10  # number of dt long steps in a propagation block
-    af.n_blocks= 3  # number of propagation and measurement blocks
+    af.dt = 0.1
+    af.n_prop_steps = 10  # number of dt long steps in a qr block
+    af.n_qr_blocks = 1  # number of qr blocks
+    af.n_blocks = 3   # number of propagation and measurement blocks
     af.n_ene_blocks= 5  # number of trajectories
-    af.n_walkers= 10
-    af.ene0= mf.e_tot
+    af.n_walkers = 10
+    af.ene0 = mf.e_tot
     af.seed = 5
     e, err, sign = af.kernel()
     
@@ -37,17 +35,16 @@ def test_uhf():
     mf = scf.UHF(mol)
     mf.kernel()
     
-    mycc = mf.CCSD(frozen=0).run()
-    
     af = afqmc.AFQMC(mf)
     af.free_projection = True
-    af.dt= 0.1
-    af.n_prop_steps= 10  # number of dt long steps in a propagation block
-    af.n_blocks= 3  # number of propagation and measurement blocks
-    af.n_ene_blocks= 5  # number of trajectories
-    af.n_walkers= 10
-    af.walker_type= "uhf"
-    af.ene0= mf.e_tot
+    af.dt = 0.1
+    af.n_prop_steps = 10  #  number of dt long steps in a qr block
+    af.n_qr_blocks = 1  # number of qr blocks
+    af.n_blocks = 3  # number of propagation and measurement blocks
+    af.n_ene_blocks = 5  # number of trajectories
+    af.n_walkers = 10
+    af.walker_type = "uhf"
+    af.ene0 = mf.e_tot
     af.seed = 5
     e, err, sign = af.kernel()
 
