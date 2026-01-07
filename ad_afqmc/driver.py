@@ -1587,7 +1587,7 @@ def fp_afqmc(
         # if n % (max(sampler.n_ene_blocks // 10, 1)) == 0:
         comm.Barrier()
 
-        times = propagator.dt * sampler.n_prop_steps * jnp.arange(sampler.n_blocks + 1)
+        times = propagator.dt * sampler.n_qr_blocks * sampler.n_prop_steps * jnp.arange(sampler.n_blocks + 1)
 
         mean_energies = np.sum(
             total_energy[: n + 1] * total_weight[: n + 1], axis=0
