@@ -546,6 +546,12 @@ class Pyscf:
         else:
             raise TypeError(f"Unexpected object '{mf_or_cc}'.")
 
+        if self.mf.mo_coeff is None:
+            raise ValueError(f"mo_coeff is None in the pyscf scf instance, please check that you ran correctly the scf calculation.")
+
+        if self.cc is not None and (self.cc.t1 is None or self.cc.t2 is None):
+            raise ValueError(f"t1 and/or t2 are None in the pyscf ccsd instance, please check that you ran correctly the ccsd calculation.")
+
     def get_basis_coeff(self):
         if isinstance(self.mf, UHF):
             basis_coeff = self.mf.mo_coeff[0]
