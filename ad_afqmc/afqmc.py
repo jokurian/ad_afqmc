@@ -361,33 +361,35 @@ class AFQMC:
 
         options = self.make_options_dict()
 
-        if self.ad_mode != "nuc_grad":
-            prep = PrepAfqmc()
-            prep.set_mol(self.mf_or_cc.mol)
-            prep.set_pyscf_mf_cc(self.mf_or_cc, self.mf_or_cc_ket)
-            prep.set_basis_coeff(self.basis_coeff)
-            prep.set_frozen_core(self.norb_frozen)
-            prep.set_chol_cut(self.chol_cut)
-            prep.set_tmpdir(self.tmpdir)
-            prep.options = options
-
-            if dry_run:
-                prep.io.set_write()
-            else:
-                prep.io.set_noio()
-
-            prep.prep()
-        else:
+        if self.ad_mode == "nuc_grad":
+            # grad_utils.prep_afqmc_nuc_grad(self.mf_or_cc, self.dR, tmpdir=self.tmpdir)
             raise NotImplementedError(
                 "Nuclear gradients with AFQMC are not implemented yet."
             )
-            # grad_utils.prep_afqmc_nuc_grad(self.mf_or_cc, self.dR, tmpdir=self.tmpdir)
+
+        prep = PrepAfqmc()
+        prep.set_mol(self.mf_or_cc.mol)
+        prep.set_pyscf_mf_cc(self.mf_or_cc, self.mf_or_cc_ket)
+        prep.set_basis_coeff(self.basis_coeff)
+        prep.set_frozen_core(self.norb_frozen)
+        prep.set_chol_cut(self.chol_cut)
+        prep.set_tmpdir(self.tmpdir)
+        prep.options = options
+
+        if dry_run or options["write_to_disk"]:
+            prep.io.set_write()
+        elif options["read_from_disk"]:
+            prep.io.set_read()
+        else:
+            prep.io.set_noio()
+
+        prep.prep()
 
         if dry_run:
-            with open("tmpdir.txt", "w") as f:
-                f.write(self.tmpdir)
-            with open(self.tmpdir + "/options.bin", "wb") as f:
-                pickle.dump(options, f)
+            #with open("tmpdir.txt", "w") as f:
+            #    f.write(self.tmpdir)
+            #with open(self.tmpdir + "/options.bin", "wb") as f:
+            #    pickle.dump(options, f)
             return self.tmpdir
         elif options["free_projection"]:
             return run_afqmc_fp(prep)
@@ -407,7 +409,7 @@ class Options:
     "do_sr", "walker_type", "symmetry_projector", "ngrid", "optimize_trial",
     "target_spin", "symmetry", "save_walkers", "dR", "free_projection",
     "ene0", "n_chunks", "vhs_mixed_precision", "trial_mixed_precision",
-    "memory_mode", "write_to_disk", "prjlo",
+    "memory_mode", "write_to_disk", "read_from_disk", "prjlo",
     )
 
     def __init__(self, mode):
@@ -451,6 +453,7 @@ class Options:
         self.trial_mixed_precision = False
         self.memory_mode = "low"
         self.write_to_disk = False # Write FCIDUMP and ci/cc coeff to disk
+        self.read_from_disk = False # Read FCIDUMP and ci/cc coeff from disk
         self.prjlo = None  # used in LNO, need to fix
 
     def to_dict(self):
