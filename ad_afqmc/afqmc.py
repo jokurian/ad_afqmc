@@ -367,6 +367,7 @@ class AFQMC:
                 "Nuclear gradients with AFQMC are not implemented yet."
             )
 
+        config.setup_jax()
         prep = PrepAfqmc()
         prep.set_mol(self.mf_or_cc.mol)
         prep.set_pyscf_mf_cc(self.mf_or_cc, self.mf_or_cc_ket)
