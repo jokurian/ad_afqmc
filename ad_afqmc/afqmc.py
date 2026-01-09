@@ -465,4 +465,6 @@ class Options:
         if t != type(dict):
             raise TypeError(f"Expected a dict but received '{t}'.")
         for key, val in options.items():
+            if key not in self.__slots__:
+                raise KeyError(f"Keyword {key} does not exist.")
             setattr(self, key, val)
