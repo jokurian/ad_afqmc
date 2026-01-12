@@ -1300,6 +1300,7 @@ def get_options(options: Dict):
     options["n_prop_steps"] = options.get("n_prop_steps", 50)
     options["n_ene_blocks"] = options.get("n_ene_blocks", 50)
     options["n_sr_blocks"] = options.get("n_sr_blocks", 1)
+    options["n_qr_blocks"] = options.get("n_qr_blocks", 1)
     options["n_blocks"] = options.get("n_blocks", 50)
     options["n_ene_blocks_eql"] = options.get("n_ene_blocks_eql", 5)
     options["n_sr_blocks_eql"] = options.get("n_sr_blocks_eql", 10)
@@ -1862,6 +1863,7 @@ def set_sampler(options: Dict) -> Any:
             options["n_prop_steps"],
             options["n_ene_blocks"],
             options["n_sr_blocks"],
+            options["n_qr_blocks"],
             options["n_blocks"],
         )
 

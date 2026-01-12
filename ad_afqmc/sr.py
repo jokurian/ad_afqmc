@@ -48,6 +48,17 @@ def stochastic_reconfiguration_unrestricted(walkers, weights, zeta):
     return [walkers[0][indices], walkers[1][indices]], weights
 
 
+@jit
+def get_sr_indices(weights, zeta):
+    nwalkers = weights.shape[0]
+    cumulative_weights = jnp.cumsum(jnp.abs(weights))
+    total_weight = cumulative_weights[-1]
+    average_weight = total_weight / nwalkers
+    weights = jnp.ones(nwalkers) * average_weight
+    z = total_weight * (jnp.arange(nwalkers) + zeta) / nwalkers
+    indices = vmap(jnp.searchsorted, in_axes=(None, 0))(cumulative_weights, z)
+    return indices
+
 # this uses numpy but is only called once after each block
 def stochastic_reconfiguration_mpi_restricted(walkers, weights, zeta, comm):
     size = comm.Get_size()

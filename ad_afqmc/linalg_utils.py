@@ -54,6 +54,11 @@ def qr_vmap_restricted(walkers):
     norm_factors = vmap(lambda x: jnp.prod(jnp.diag(x)))(r)
     return walkers, norm_factors
 
+@jit
+def qr_norm_vmap_restricted(walkers):
+    r = vmap(lambda x: jnp.linalg.qr(x, mode='r'))(walkers)
+    norm_factors = vmap(lambda x: jnp.prod(jnp.diag(x)))(r)
+    return norm_factors
 
 @jit
 def qr_vmap_unrestricted(walkers):
@@ -71,6 +76,15 @@ def qr_vmap_unrestricted(walkers):
         [jnp.abs(norm_factors_0), jnp.abs(norm_factors_1)]
     )
 
+@jit
+def qr_norm_vmap_unrestricted(walkers):
+    r_0 = vmap(lambda x: jnp.linalg.qr(x, mode='r'))(walkers[0])
+    r_1 = vmap(lambda x: jnp.linalg.qr(x, mode='r'))(walkers[1])
+    norm_factors_0 = vmap(lambda x: jnp.prod(jnp.diag(x)))(r_0)
+    norm_factors_1 = vmap(lambda x: jnp.prod(jnp.diag(x)))(r_1)
+    return jnp.array(
+        [jnp.abs(norm_factors_0), jnp.abs(norm_factors_1)]
+    )
 
 # modified cholesky for a given matrix
 @partial(jit, static_argnums=(1, 2))

@@ -1506,7 +1506,7 @@ def fp_afqmc(
     comm.Barrier()
     init_time = time.time() - init
     print("#\n# Sampling sweeps:")
-    print("#  Iter        Mean energy    Stochastic error    Sign")
+    print("#  Beta        Mean energy    Stochastic error    Sign")
     comm.Barrier()
 
     total_energy = np.zeros((sampler.n_ene_blocks, sampler.n_blocks + 1)) + 0.0j
@@ -1516,6 +1516,7 @@ def fp_afqmc(
     avg_energy = np.zeros((sampler.n_blocks)) + 0.0j
     avg_weight = np.zeros((sampler.n_blocks)) + 0.0j
 
+    t0 = time.time()
     for n in range(
         sampler.n_ene_blocks
     ):  # hacking this variable for number of trajectories
@@ -1535,7 +1536,12 @@ def fp_afqmc(
 
         prop_data["overlaps"] = trial_bra.calc_overlap(prop_data["walkers"], wave_data_bra)
         prop_data["weights"] = jnp.ones_like(prop_data["weights"])
-        energy_samples = trial_bra.calc_energy(prop_data["walkers"], ham_data, wave_data_bra)
+
+        # Computing the energy at time = 0.0 is often unecessary
+        if "no_beta_0_fp" in options and options["no_beta_0_fp"]:
+            energy_samples = 0.0 + 0.0j
+        else:
+            energy_samples = trial_bra.calc_energy(prop_data["walkers"], ham_data, wave_data_bra)
 
         e_estimate = jnp.array(jnp.sum(energy_samples) / propagator.n_walkers)
         prop_data["e_estimate"] = e_estimate.real
@@ -1586,7 +1592,7 @@ def fp_afqmc(
         # if n % (max(sampler.n_ene_blocks // 10, 1)) == 0:
         comm.Barrier()
 
-        times = propagator.dt * sampler.n_prop_steps * jnp.arange(sampler.n_blocks + 1)
+        times = propagator.dt * sampler.n_qr_blocks * sampler.n_prop_steps * jnp.arange(sampler.n_blocks + 1)
 
         mean_energies = np.sum(
             total_energy[: n + 1] * total_weight[: n + 1], axis=0
@@ -1611,7 +1617,8 @@ def fp_afqmc(
                         mean_signs[i].real,
                     )
                 )
-            print("")
+            t1 = time.time()
+            print(f"Wall time: {t1-t0:12.1f} s\n")
 
         np.savetxt(
             "samples_raw.dat",
