@@ -58,6 +58,26 @@ def _mo_coeff_signature(mo_coeff: Any) -> tuple[tuple[int, ...], ...]:
     return (tuple(int(dim) for dim in np.asarray(mo_coeff).shape),)
 
 
+def _mo_coeff_nmo(mo_coeff: Any) -> int:
+    if isinstance(mo_coeff, (tuple, list)):
+        shapes = [np.asarray(block).shape for block in mo_coeff]
+        if len(shapes) == 0:
+            raise ValueError("Spin-separated MO coefficients cannot be empty.")
+        if any(len(shape) == 0 for shape in shapes):
+            raise ValueError("MO coefficient blocks must have at least one dimension.")
+        nmo = int(shapes[0][-1])
+        if any(int(shape[-1]) != nmo for shape in shapes):
+            raise ValueError(
+                "Spin-separated MO coefficient blocks must have the same number of orbitals."
+            )
+        return nmo
+
+    shape = np.asarray(mo_coeff).shape
+    if len(shape) == 0:
+        raise ValueError("MO coefficients must have at least one dimension.")
+    return int(shape[-1])
+
+
 def _copy_scf_with_cc_mo_coeff(cc: Any, mf: Any) -> Any:
     if not hasattr(cc, "mo_coeff") or cc.mo_coeff is None:
         return mf
@@ -476,7 +496,7 @@ class StagedCc:
                 raise NotImplementedError(
                     "List-valued cc.frozen is currently supported only for restricted CCSD staging."
                 )
-            trial_frozen = _normalize_frozen_list(cc_frozen, nmo=mf.mo_coeff.shape[-1])
+            trial_frozen = _normalize_frozen_list(cc_frozen, nmo=_mo_coeff_nmo(mf.mo_coeff))
             if frozen is None:
                 afqmc_frozen = 0
             elif isinstance(frozen, int):
@@ -560,14 +580,15 @@ class StagedMf:
             kind = "ghf"
 
         frozen = _stage_frozen(frozen)
+        nmo = _mo_coeff_nmo(mf.mo_coeff)
 
         if isinstance(frozen, np.ndarray):
-            frozen_arr = _normalize_frozen_list(frozen, nmo=mf.mo_coeff.shape[-1])
+            frozen_arr = _normalize_frozen_list(frozen, nmo=nmo)
             if frozen_arr.size > 0:
-                assert frozen_arr.size < mf.mo_coeff.shape[-1]
+                assert frozen_arr.size < nmo
             frozen = frozen_arr
         elif isinstance(frozen, int):
-            assert frozen < mf.mo_coeff.shape[-1]
+            assert frozen < nmo
             assert frozen >= 0
         elif frozen is None:
             frozen = 0
@@ -583,7 +604,7 @@ class StagedMf:
 
     @property
     def norb(self) -> int:
-        return self.mf.mo_coeff.shape[-1]
+        return _mo_coeff_nmo(self.mf.mo_coeff)
 
     def __getattr__(self, name: str):
         if name in StagedMf._delegate:
@@ -640,7 +661,7 @@ class StagedMfOrCc:
 
     @property
     def norb(self) -> int:
-        return self.mf.mo_coeff.shape[-1]
+        return _mo_coeff_nmo(self.mf.mo_coeff)
 
     def __getattr__(self, name: str):
         if name in StagedMfOrCc._delegate_cc:
@@ -1116,7 +1137,7 @@ def _stage_cisd_input(obj: StagedMfOrCc) -> TrialInput:
 
         nocc_t_core, nvir_t_outer = _infer_restricted_trial_freeze_from_cc(
             cc_frozen=obj.trial_frozen,
-            nmo_full=int(obj.mf.mo_coeff.shape[-1]),
+            nmo_full=_mo_coeff_nmo(obj.mf.mo_coeff),
             nocc_full=int(obj.mol.nelectron // 2),
             norb_frozen=int(obj.afqmc_frozen),
             t1_shape=(int(t1_arr.shape[0]), int(t1_arr.shape[1])),
