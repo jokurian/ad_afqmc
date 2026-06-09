@@ -92,6 +92,8 @@ def _copy_scf_with_cc_mo_coeff(cc: Any, mf: Any) -> Any:
 
     mf_copy = copy.copy(mf)
     mf_copy.mo_coeff = cc.mo_coeff
+    if getattr(mf_copy, "_opt", None) is None:
+        mf_copy._opt = {None: None}
     return mf_copy
 
 
