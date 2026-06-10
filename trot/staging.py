@@ -92,9 +92,60 @@ def _copy_scf_with_cc_mo_coeff(cc: Any, mf: Any) -> Any:
 
     mf_copy = copy.copy(mf)
     mf_copy.mo_coeff = cc.mo_coeff
-    if getattr(mf_copy, "_opt", None) is None:
-        mf_copy._opt = {None: None}
     return mf_copy
+
+
+def _freeze_core_from_mo_cholesky(
+    *,
+    h0: float,
+    h1: NDArray,
+    chol: NDArray,
+    norb_frozen: int,
+    nelec: Tuple[int, int],
+) -> tuple[float, NDArray, NDArray, Tuple[int, int]]:
+    nmo = int(h1.shape[0])
+    if h1.shape != (nmo, nmo):
+        raise ValueError(f"h1 must be square, got shape {h1.shape}.")
+    if chol.ndim != 3 or chol.shape[1:] != (nmo, nmo):
+        raise ValueError(f"chol must have shape (nchol, {nmo}, {nmo}), got {chol.shape}.")
+    if norb_frozen < 0:
+        raise ValueError(f"norb_frozen must be non-negative, got {norb_frozen}.")
+    if norb_frozen > min(nelec):
+        raise ValueError(f"norb_frozen={norb_frozen} exceeds min(nelec)={min(nelec)}")
+    if norb_frozen >= nmo:
+        raise ValueError(f"norb_frozen={norb_frozen} leaves no active orbitals (nmo={nmo}).")
+    if norb_frozen == 0:
+        return float(h0), np.asarray(h1), np.asarray(chol), nelec
+
+    nelec_active = (int(nelec[0] - norb_frozen), int(nelec[1] - norb_frozen))
+    if nelec_active[0] < 0 or nelec_active[1] < 0:
+        raise ValueError(
+            f"norb_frozen={norb_frozen} leaves negative active electron count "
+            f"{nelec_active} from nelec={nelec}."
+        )
+    if sum(nelec_active) <= 0:
+        raise ValueError("Frozen core left no active electrons.")
+
+    core = slice(0, norb_frozen)
+    act = slice(norb_frozen, nmo)
+
+    chol_core = np.asarray(chol[:, core, core])
+    chol_act = np.asarray(chol[:, act, act])
+    chol_act_core = np.asarray(chol[:, act, core])
+    chol_core_act = np.asarray(chol[:, core, act])
+
+    core_trace = np.trace(chol_core, axis1=1, axis2=2)
+    vj = 2.0 * np.einsum("x,xpq->pq", core_trace, chol_act, optimize=True)
+    vk = np.einsum("xpi,xiq->pq", chol_act_core, chol_core_act, optimize=True)
+
+    h1_eff = np.asarray(h1[act, act]) + vj - vk
+
+    e1_core = 2.0 * np.trace(np.asarray(h1[core, core]))
+    ej_core = 2.0 * np.dot(core_trace, core_trace)
+    ek_core = np.einsum("xij,xji->", chol_core, chol_core, optimize=True)
+    ecore = float(np.real(h0 + e1_core + ej_core - ek_core))
+
+    return ecore, np.asarray(h1_eff), np.array(chol_act, copy=True), nelec_active
 
 
 def _infer_restricted_trial_freeze_from_cc(
@@ -833,8 +884,6 @@ def _stage_ham_input(obj: StagedMfOrCc, *, chol_cut: float, verbose: bool) -> Ha
     Produce h0/h1/chol in a single orthonormal basis.
     For UHF, we use the alpha MO basis for integrals.
     """
-    from pyscf import mcscf
-
     mol = obj.mol
     scf_obj = obj.mf
 
@@ -886,28 +935,22 @@ def _stage_ham_input(obj: StagedMfOrCc, *, chol_cut: float, verbose: bool) -> Ha
     # freeze core
     if norb_frozen > 0 and scf_obj.kind != "ghf":
 
-        if isinstance(norb_frozen, int):
-            if norb_frozen > min(nelec):
-                raise ValueError(f"norb_frozen={norb_frozen} exceeds min(nelec)={min(nelec)}")
+        if norb_frozen > min(nelec):
+            raise ValueError(f"norb_frozen={norb_frozen} exceeds min(nelec)={min(nelec)}")
 
-            nelec_frozen = 2 * norb_frozen
-            ncas = basis_coeff.shape[1] - norb_frozen
-            nelecas = mol.nelectron - nelec_frozen
-
-        if nelecas <= 0 or ncas <= 0:
+        ncas = basis_coeff.shape[1] - norb_frozen
+        nelec_active = (nelec[0] - norb_frozen, nelec[1] - norb_frozen)
+        if min(nelec_active) < 0 or sum(nelec_active) <= 0 or ncas <= 0:
             raise ValueError("Frozen core left no active electrons/orbitals.")
 
-        mc = mcscf.CASSCF(scf_obj.mf, ncas, nelecas)
-        mc.mo_coeff = basis_coeff  # type: ignore
-        h1_eff, ecore = mc.get_h1eff()  # type: ignore
-        i0 = int(mc.ncore)  # type: ignore
-        i1 = i0 + int(mc.ncas)  # type: ignore
-
-        h0 = float(ecore)
-        h1 = np.asarray(h1_eff)
-        chol = np.array(chol[:, i0:i1, i0:i1], copy=True)
+        h0, h1, chol, nelec = _freeze_core_from_mo_cholesky(
+            h0=h0,
+            h1=h1,
+            chol=chol,
+            norb_frozen=norb_frozen,
+            nelec=nelec,
+        )
         norb = int(ncas)
-        nelec = tuple(int(x) for x in mc.nelecas)  # type: ignore
     elif norb_frozen > 0 and scf_obj.kind == "ghf":
         raise NotImplementedError(
             "Frozen core approximation not available for generalised integrals."
